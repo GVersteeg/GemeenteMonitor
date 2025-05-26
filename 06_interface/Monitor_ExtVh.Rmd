@@ -1,0 +1,572 @@
+---
+title: "Monitor Externe Veiligheid V1.0"
+author: "G.Versteeg / L. de Puij"
+output:
+  flexdashboard::flex_dashboard:
+  orientation: rows
+##    css: styles.css
+vertical_layout: fill
+---
+  
+```{r housekeeping, include=FALSE}
+
+## -------------------------------------------------------------------------- #
+## Setting up R Markdown options                                              #
+## -------------------------------------------------------------------------- #
+# We want to hide the code and only see the results
+knitr::opts_chunk$set(echo = F)
+# We don't want to see any warnings from our code
+knitr::opts_chunk$set (warning = F)
+# We don't want to see any messages
+knitr::opts_chunk$set(message = F)
+
+## -------------------------------------------------------------------------- #
+## Setting up Libraries                                                       #
+## -------------------------------------------------------------------------- #
+## std. leaflet versions do NOT work !! ------------------------------------- #
+# devtools::install_github("dmurdoch/leaflet@crosstalk4") 
+## -------------------------------------------------------------------------- #
+## d3scatter is not available on CRAN (yet does not render in dashboard ?? -- # devtools::install_github("jcheng5/d3scatter") 
+## -------------------------------------------------------------------------- #
+library(flexdashboard)
+library(tidyverse)
+library(readxl)
+library(rsconnect)
+library(pins)
+library(sf)
+library(DT)
+library(leaflet)
+library(leaflet.providers)
+library(crosstalk)
+
+# -----------------------------------------------------------------------------
+## ------------------------ fresh slate ---------------------------------------
+rm(list=ls())
+
+## -------------------------------------------------------------------------- #
+## Setting up parameters                                                      #
+## -------------------------------------------------------------------------- #
+## Switch for controling where the script actually runs:                      #
+## productieomgeving = RStudio Connect (set as variable within the content)   #
+## onderzoeksomgeving = RStudio Server Pro within the UDP                     #
+## ontwikkelomgeving = Possible local development environment outside of UDP  #
+## -------------------------------------------------------------------------- #
+context <- Sys.getenv("CONTEXT")
+
+## -------------------------------------------------------------------------- #
+## Setting up Housekeeping (filenames)                                        #
+## -------------------------------------------------------------------------- #
+fname_krb_ev <- "/regels.rds"
+fname_geo_gem <- "/gemeente.rds"
+fname_geo_bwp <- "/bouwplan.rds"
+fname_ag <- "/aandachtsgebieden.rds"
+fname_loc_zkg <- "/zkg.rds"
+fname_lst <- "/ev_raw_files.rds"
+
+## -------------------------------------------------------------------------- #
+## Setting up Housekeeping (data links)                                       #
+## -------------------------------------------------------------------------- #
+if (context == "ontwikkelomgeving") {
+#  dir_base <- Sys.getenv("POS_DATALAKE")
+  dir_base <- "~/link_datalake/Amsterdam/"
+  dir_parm <- "../parameters"
+  dir_cln <- paste0(dir_base, "schone_data/ExtVeil")
+
+  fpath_krb_ev <- paste0(dir_cln, fname_krb_ev)
+  fpath_geo_gem <- paste0(dir_cln, fname_geo_gem)
+  fpath_geo_bwp <- paste0(dir_cln, fname_geo_bwp)
+  fpath_ag <- paste0(dir_cln, fname_ag)
+  fpath_lst <- paste0(dir_cln, fname_lst)
+  fpath_loc_zkg <- paste0(dir_cln, fname_loc_zkg)
+
+} else {
+  dir_data <- paste0(getwd(),"/data/")
+  dir.create(dir_data, showWarnings = FALSE)
+  dir_parm <- "../parameters/"
+
+  fpath_krb_ev <- paste0(dir_data, fname_krb_ev)
+  fpath_geo_brt <- paste0(dir_data, fname_geo_brt)
+  fpath_geo_gem <- paste0(dir_data, fname_geo_gem)
+  fpath_geo_bwp <- paste0(dir_data, fname_geo_bwp)
+  fpath_ag <- paste0(dir_data, fname_ag)
+  fpath_loc_sb <- paste0(dir_data, fname_loc_sb)
+  fpath_loc_bl <- paste0(dir_data, fname_loc_bl)
+  fpath_loc_wegen <- paste0(dir_data, fname_loc_wegen)
+  fpath_loc_zkg <- paste0(dir_data, fname_loc_zkg)
+  fpath_mtr <- paste0(dir_data, fname_mtr)
+  fpath_lss <- paste0(dir_data, fname_lss)
+  fpath_lsv <- paste0(dir_data, fname_lsv)
+  fpath_mss <- paste0(dir_data, fname_mss)
+  fpath_msv <- paste0(dir_data, fname_msv)
+  fpath_lst <- paste0(dir_data, fname_lst)
+
+  board_register_rsconnect(
+    key = Sys.getenv("CONNECT_API_KEY"), 
+    server = Sys.getenv("CONNECT_SERVER")
+  )
+}
+
+```
+
+```{r read_files, include=FALSE}
+
+if (context != "ontwikkelomgeving") {
+  ## -------------------------------------------------------------------------- #
+  ## Setting up parameters                                                      #
+  ## -------------------------------------------------------------------------- #
+  ## -------------------------------------------------------------------------- #
+  ## read and process zipped files from RS Connect EV-pin                       #
+  ## -------------------------------------------------------------------------- #
+  fpath_ev_zip <- pin_get("EV_data", board = "rsconnect", files = TRUE)
+  flist_ev <- unzip(fpath_ev_zip, list = TRUE) %>% 
+    mutate(Target = gsub("^.*\\/\\/","", Name),
+           Target = str_remove(Target, ".rds"),
+           Target = str_remove(Target, ".RDS"))
+  
+  ## unzip all pinned data into the /data directory ------------------------- #
+  unzip(fpath_ev_zip, exdir = dir_data, files = flist_ev$Name)
+} 
+
+## -------------------------------------------------------------------------- #
+# Read all files from clean folder Externe Veiligheid                     --- #
+## -------------------------------------------------------------------------- #
+sf_ag <- read_rds(fpath_ag) %>% 
+  filter(ag_gebied != "Gifwolkaandachtsgebied")
+df_krb <- read_rds(fpath_krb_ev)
+sf_gem <- read_rds(fpath_geo_gem)
+sf_bwp <- read_rds(fpath_geo_bwp)
+df_lst <- read_rds(fpath_lst)
+sf_loc_zkg <- read_rds(fpath_loc_zkg)
+
+```
+
+A1 Aandachtsgebieden {data-orientation=columns data-navmenu="EV-Beleid" data-icon="fa-list"}
+=============================================  
+  
+```{r section_A1, include=FALSE}
+
+## -------------------------------------------------------------------------- #
+df_tbl_A11a <- st_drop_geometry(sf_ag) %>%
+  group_by(ag_gebied) %>%
+  count() %>%
+  ungroup()
+names(df_tbl_A11a) <- c("Type aandachtsgebied", "aantal")
+
+df_tbl_A11b <- st_drop_geometry(sf_ag) %>% 
+  group_by(ag_type) %>% 
+  count() %>% 
+  ungroup()
+names(df_tbl_A11b) <- c("Risicobron", "aantal")
+
+df_tbl_A11c <- st_drop_geometry(sf_ag) %>%
+#   group_by(sys_source) %>%
+  group_by(ag_revcat) %>%
+  count() %>%
+  ungroup()
+#names(df_tbl_A11c) <- c("Bron organisatie", "aantal")
+names(df_tbl_A11c) <- c("REV Categorie", "aantal")
+
+df_tbl_A11d <- st_drop_geometry(sf_loc_zkg) %>% 
+  group_by(pandstatus) %>% 
+  count() %>% 
+  ungroup()
+names(df_tbl_A11d) <- c("ZK gebouwen", "aantal")
+
+## -------------------------------------------------------------------------- #
+## --- Aandachtsgebieden verrijken met regel en argument, opdelen) ---------- #
+## -------------------------------------------------------------------------- #
+## --- Aandachtsgebieden ---------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+df_krb_ag <- df_krb %>% 
+  filter(str_detect(jur_zone, "Aandachtsgebied")) %>% 
+  select(key, regel, motivatie) %>% 
+  rename(ag_key = key,
+         artikel = motivatie)
+
+sf_gem <- sf_gem %>% 
+  mutate(area = st_area(sf_gem))
+
+sf_A1 <- sf_ag %>% 
+  left_join(df_krb_ag, by = "ag_key")
+
+sf_A1_bl <- sf_A1 %>% 
+  filter(ag_type == "buisleiding") %>%  
+  mutate(area = round(st_area(.)), 0) %>% 
+  mutate(in_id = c(1:nrow(.)))
+
+sf_A1_tp_ipo <- sf_A1 %>% 
+  filter(ag_type == "basisnetroute",
+         str_detect(sys_source, "IPO")) %>%  
+  mutate(area = round(st_area(.)), 0) %>% 
+  mutate(in_id = c(1:nrow(.)))
+
+sf_A1_sb_ipo <- sf_A1 %>% 
+  filter(ag_type == "stationaire bron",
+         str_detect(sys_source, "IPO")) %>% 
+  slice(-2) %>%   ## geometry absent
+  mutate(area = round(st_area(.)), 0) %>% 
+  mutate(in_id = c(1:nrow(.)))
+
+```
+
+
+Inputs_A1.1 {.sidebar}
+-----------------------------------------------------------------------
+**A1. Overzicht aandachtsgebieden**  
+  
+<font size="0.8em">
+
+Note: De lokaties van aandachtsgebieden zijn 14 feb 2024 opgehaald vanuit de WFS-server van de ev-signaleringskaart van het IPO. 
+Note: De lokaties van zeer kwetsbare gebouwen zijn 14 feb 2024 opgehaald vanuit de WFS-server van de ev-signaleringskaart van het IPO. 
+
+---
+
+</font>
+
+```{r table_A11a}
+NumCols <- 1:ncol(df_tbl_A11a)
+df_tbl_A11a %>%
+  DT::datatable(rownames = FALSE,
+                options = list(dom = "t",
+                               headerCallback = DT::JS(
+                                 "function(thead) {",
+                                 "  $(thead).css('font-size', '0.7em');",
+                                 "}" ))) %>%
+  DT::formatStyle(columns = NumCols, fontSize = '70%')
+
+```
+
+---
+
+```{r table_A11b}
+NumCols <- 1:ncol(df_tbl_A11b)
+df_tbl_A11b %>%
+  DT::datatable(rownames = FALSE,
+                options = list(dom = "t",
+                               headerCallback = DT::JS(
+                                 "function(thead) {",
+                                 "  $(thead).css('font-size', '0.7em');",
+                                 "}" ))) %>%
+  DT::formatStyle(columns = NumCols, fontSize = '70%')
+
+```
+
+---
+
+```{r table_A11c}
+NumCols <- 1:ncol(df_tbl_A11c)
+df_tbl_A11c %>%
+  DT::datatable(rownames = FALSE,
+                options = list(dom = "t",
+                               headerCallback = DT::JS(
+                                 "function(thead) {",
+                                 "  $(thead).css('font-size', '0.7em');",
+                                 "}" ))) %>%
+  DT::formatStyle(columns = NumCols, fontSize = '70%')
+
+```
+
+---
+
+```{r table_A11d}
+NumCols <- 1:ncol(df_tbl_A11d)
+df_tbl_A11d %>%
+  DT::datatable(rownames = FALSE,
+                options = list(dom = "t",
+                               headerCallback = DT::JS(
+                                 "function(thead) {",
+                                 "  $(thead).css('font-size', '0.7em');",
+                                 "}" ))) %>%
+  DT::formatStyle(columns = NumCols, fontSize = '70%')
+
+```
+
+Column A1.2 {data-width=100%}
+-----------------------------------------------------------------------
+  
+### Aandachtsgebieden {data-height=100%}
+  
+```{r Map_A12}
+lbls_bl <- paste0(
+  sf_A1_bl$ag_gebied, " ", sf_A1_bl$in_id,
+  "<br> REV-categorie: ", sf_A1_bl$ag_revcat) %>%
+  lapply(htmltools::HTML)
+
+# map
+lf_A12 <- leaflet(sf_gem) %>%
+  # addTiles() %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+  addPolylines(data = sf_gem, color = "black", stroke = TRUE, weight = 1) %>% 
+  addPolygons(data = sf_A1_bl, group = "AG'n Buisleidingen", 
+              color = "#FF7B70", 
+              stroke = FALSE, fillOpacity = 0.5,
+              label = ~lbls_bl,
+              popup = ~paste0("<b>", sf_A1_bl$ag_gebied, "</b>", "<br>",
+                              "<b>", "- hoofdtype: ", "</b>", sf_A1_bl$ag_type, "<br>",
+                              "<b>", "- activiteit: ", "</b>", sf_A1_bl$ag_actor, "<br>",
+                              "<b>", "- rev_categorie: ", "</b>", sf_A1_bl$ag_revcat, "<br>",
+                              "<b>", "- planregel: ", "</b>", sf_A1_bl$planregel, "<br>",
+                              "<b>", "- motivatie: ", "</b>", sf_A1_bl$motivatie, "<br>",
+                              "<b>", "- bron naam: ", "</b>", sf_A1_bl$sys_source, "<br>", 
+                              "<b>", "- bron datum: ", "</b>", sf_A1_bl$sys_date, "<br>", 
+                              "<b>", "- bron bestand: ", "</b>", sf_A1_bl$sys_file)) %>% 
+  addPolygons(data = sf_A1_tp_ipo, group = "AG'n Basisnet Weg IPO", 
+              color = "#F4A63B", 
+              stroke = FALSE, fillOpacity = 0.5,
+              label = ~paste0(sf_A1_tp_ipo$ag_gebied, ": ", 
+                              sf_A1_tp_ipo$ag_revcat),
+              popup = ~paste0("<b>", sf_A1_tp_ipo$ag_gebied, "</b>", "<br>",
+                              "<b>", "- hoofdtype: ", "</b>", sf_A1_tp_ipo$ag_type, "<br>",
+                              "<b>", "- activiteit: ", "</b>", sf_A1_tp_ipo$ag_actor, "<br>",
+                              "<b>", "- rev_categorie: ", "</b>", sf_A1_tp_ipo$ag_revcat, "<br>",
+                              "<b>", "- planregel: ", "</b>", sf_A1_tp_ipo$planregel, "<br>",
+                              "<b>", "- motivatie: ", "</b>", sf_A1_tp_ipo$motivatie, "<br>",
+                              "<b>", "- bron naam: ", "</b>", sf_A1_tp_ipo$sys_source, "<br>", 
+                              "<b>", "- bron datum: ", "</b>", sf_A1_tp_ipo$sys_date, "<br>", 
+                              "<b>", "- bron bestand: ", "</b>", sf_A1_tp_ipo$sys_file)) %>% 
+  addPolygons(data = sf_A1_sb_ipo, group = "AG'n Stationaire Bronnen IPO", 
+              color = ~ifelse(sf_A1_sb_ipo$ag_stof == "lpg",
+                              "#B91C14", "#FF1C14"), 
+              stroke = FALSE, fillOpacity = 0.5,
+              label = ~paste0(sf_A1_sb_ipo$ag_gebied, ": ", 
+                              sf_A1_sb_ipo$ag_type),
+              popup = ~paste0("<b>", sf_A1_sb_ipo$ag_gebied, "</b>", "<br>",
+                              "<b>", "- type_bron: ", "</b>", sf_A1_sb_ipo$ag_type, "<br>",
+                              "<b>", "- activiteit: ", "</b>", sf_A1_sb_ipo$ag_actor, "<br>",
+                              "<b>", "- rev_categorie: ", "</b>", sf_A1_sb_ipo$ag_revcat, "<br>",
+                              "<b>", "- planregel: ", "</b>", sf_A1_sb_ipo$planregel, "<br>",
+                              "<b>", "- motivatie: ", "</b>", sf_A1_sb_ipo$motivatie, "<br>",
+                              "<b>", "- bron naam: ", "</b>", sf_A1_sb_ipo$sys_source, "<br>", 
+                              "<b>", "- bron datum: ", "</b>", sf_A1_sb_ipo$sys_date, "<br>", 
+                              "<b>", "- bron bestand: ", "</b>", sf_A1_sb_ipo$sys_file)) %>% 
+  addPolygons(data = sf_loc_zkg, group = "Zeer kwestbare gebouwen", 
+              color = "#385723", stroke = FALSE, fillOpacity = 0.5,
+              label = ~paste0(sf_loc_zkg$naam, ": ", 
+                              sf_loc_zkg$straatnaam, " ", sf_loc_zkg$huisnrs),
+              popup = ~paste0("<b>", sf_loc_zkg$pandid, "</b>", "<br>",
+                              "<b>", "- naam: ", "</b>", sf_loc_zkg$naam, "<br>",
+                              "<b>", "- categorie: ", "</b>", sf_loc_zkg$categorie, "<br>",
+                              "<b>", "- status: ", "</b>", sf_loc_zkg$pandstatus, "<br>",
+                              "<b>", "- bouwjaar: ", "</b>", sf_loc_zkg$bouwjaar, "<br>",
+                              "<b>", "- oppervlak: ", "</b>", sf_loc_zkg$oppervlak, "<br>",
+                              "<b>", "- populatie: ", "</b>", sf_loc_zkg$populatie_, "<br>", 
+                              "<b>", "- bron naam: ", "</b>", sf_loc_zkg$sys_source, "<br>", 
+                              "<b>", "- bron datum: ", "</b>", sf_loc_zkg$sys_date, "<br>", 
+                              "<b>", "- bron bestand: ", "</b>", sf_loc_zkg$sys_file)) %>%  
+  addLegend(colors = c("#FF7B70", "#F4A63B", 
+                       "#FF1C14", "#B91C14", 
+                       "#385723"), 
+            labels = c("Buisleidingen", "Basisnet wegen", 
+                       "Overige Stationaire bronnen", "LPG-tankstations",
+                       "Zeer kwetsbaar gebouw"),
+            opacity = 0.5, title = "Aandachtsgebieden & ZKG",
+            position = "topright") %>% 
+  addLayersControl(
+    baseGroups = c("basemap (OSM)"),
+    overlayGroups = c("AG'n Buisleidingen", 
+                      "AG'n Basisnet Weg IPO",
+                      "AG'n Stationaire Bronnen IPO",
+                      "Zeer kwestbare gebouwen"),
+    options = layersControlOptions(collapsed = FALSE)) %>% 
+    hideGroup(c("AG'n Buisleidingen", 
+                      "AG'n Basisnet Weg IPO",
+                      "AG'n Stationaire Bronnen IPO",
+                      "Zeer kwestbare gebouwen"))
+
+lf_A12
+
+```
+
+A2 Oppervlaktes {data-orientation=rows data-navmenu="EV-Beleid" data-icon="fa-list"}
+=============================================  
+
+<!-- Inputs_A2.1 {.sidebar} -->
+<!-- ----------------------------------------------------------------------- -->
+<!-- **A1. Oppervlaktes aandachtsgebieden**   -->
+
+<!-- <font size="0.8em"> -->
+
+<!-- Binnen de Omgevingswet worden aandachtsgebieden genoemd, waarbinnen geen zeer kwetsbare gebouwen mogen worden gebouwd en waarbinnen extra bouweisen gelden voor (beperkt) kwetsbare gebouwen en locaties.  -->
+
+<!-- De extra bouweisen die binnen die gebieden gelden, verhogen potentieel de bouwkosten. Dit kan de de business case voor bouwprojecten negatief beïnvloeden.  -->
+
+<!-- Hier wordt een overzicht gegeven van de oppervlaktes bij de aandachtsgebeiden rond de diverse risicobronnen binnen de gemeente. -->
+
+<!-- --- -->
+
+
+Row A2.1 {data-height=20%, data-width=80%}
+-----------------------------------------------------------------------
+
+### Totaal oppervlak
+```{r valuebox_A21}
+## Select --------------------------------------------------------------------
+
+## Display value -------------------------------------------------------------
+waarde <- sum(sf_gem$area)
+waarde <- prettyNum(waarde, big.mark = ".")
+sw_higher <- FALSE
+valueBox(waarde, icon = "fa-pencil", 
+         color = ifelse(sw_higher, "warning", "primary"))
+```
+
+### Aandachtsgebieden buisleidingen
+```{r valuebox_A12}
+## Select --------------------------------------------------------------------
+
+## Display value -------------------------------------------------------------
+waarde <- sum(sf_A1_bl$area)
+waarde <- prettyNum(waarde, big.mark = ".")
+sw_higher <- FALSE
+valueBox(waarde, icon = "fa-pencil", 
+         color = ifelse(sw_higher, "warning", "primary"))
+```
+
+
+### Aandachtsgebieden basistransportnet
+```{r valuebox_A13}
+## Select --------------------------------------------------------------------
+
+## Display value -------------------------------------------------------------
+waarde <- sum(sf_A1_tp_ipo$area)
+waarde <- prettyNum(waarde, big.mark = ".")
+sw_higher <- FALSE
+valueBox(waarde, icon = "fa-pencil", 
+         color = ifelse(sw_higher, "warning", "primary"))
+```
+
+
+### Aandachtsgebieden stationaire bronnen
+```{r valuebox_A14}
+## Select --------------------------------------------------------------------
+
+## Display value -------------------------------------------------------------
+waarde <- sum(sf_A1_sb_ipo$area)
+waarde <- prettyNum(waarde, big.mark = ".")
+sw_higher <- FALSE
+valueBox(waarde, icon = "fa-pencil", 
+         color = ifelse(sw_higher, "warning", "primary"))
+```
+
+
+Row A2.2 {data-height=80%, data-width=80%}
+-----------------------------------------------------------------------
+  
+### Aandachtsgebieden
+  
+```{r Map_A22}
+lbls_bl <- paste0(
+  sf_A1_bl$ag_gebied, " ", sf_A1_bl$in_id,
+  "<br> REV-categorie: ", sf_A1_bl$ag_revcat,
+  "<br> Area: ", prettyNum(sf_A1_bl$area, big.mark = "."), " ") %>%
+  lapply(htmltools::HTML)
+
+lbls_tp <- paste0(
+  sf_A1_tp_ipo$ag_gebied, " ", sf_A1_tp_ipo$in_id,
+  "<br> REV-categorie: ", sf_A1_tp_ipo$ag_revcat,
+  "<br> Area: ", prettyNum(sf_A1_tp_ipo$area, big.mark = "."), " ") %>%
+  lapply(htmltools::HTML)
+
+lbls_sb <- paste0(
+  sf_A1_sb_ipo$ag_gebied, " ", sf_A1_sb_ipo$in_id,
+  "<br> REV-categorie: ", sf_A1_sb_ipo$ag_revcat,
+  "<br> Area: ", prettyNum(sf_A1_sb_ipo$area, big.mark = "."), " ") %>%
+  lapply(htmltools::HTML)
+
+# map
+lf_A22 <- leaflet(sf_gem) %>%
+  # addTiles() %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+  addPolylines(data = sf_gem, color = "black", stroke = TRUE, weight = 2) %>% 
+  addPolygons(data = sf_A1_bl, group = "AG'n Buisleidingen", 
+              color = "#FF7B70", 
+              stroke = FALSE, fillOpacity = 0.5,
+              label = ~lbls_bl,
+              popup = ~paste0("<b>", sf_A1_bl$ag_gebied, "</b>", "<br>",
+                              "<b>", "- hoofdtype: ", "</b>", sf_A1_bl$ag_type, "<br>",
+                              "<b>", "- activiteit: ", "</b>", sf_A1_bl$ag_actor, "<br>",
+                              "<b>", "- rev_categorie: ", "</b>", sf_A1_bl$ag_revcat, "<br>",
+                              "<b>", "- planregel: ", "</b>", sf_A1_bl$planregel, "<br>",
+                              "<b>", "- motivatie: ", "</b>", sf_A1_bl$motivatie, "<br>",
+                              "<b>", "- bron naam: ", "</b>", sf_A1_bl$sys_source, "<br>", 
+                              "<b>", "- bron datum: ", "</b>", sf_A1_bl$sys_date, "<br>", 
+                              "<b>", "- bron bestand: ", "</b>", sf_A1_bl$sys_file)) %>% 
+  addPolygons(data = sf_A1_tp_ipo, group = "AG'n Basisnet Weg IPO", 
+              color = "#F4A63B", 
+              stroke = FALSE, fillOpacity = 0.5,
+              label = ~lbls_tp,
+              popup = ~paste0("<b>", sf_A1_tp_ipo$ag_gebied, "</b>", "<br>",
+                              "<b>", "- hoofdtype: ", "</b>", sf_A1_tp_ipo$ag_type, "<br>",
+                              "<b>", "- activiteit: ", "</b>", sf_A1_tp_ipo$ag_actor, "<br>",
+                              "<b>", "- rev_categorie: ", "</b>", sf_A1_tp_ipo$ag_revcat, "<br>",
+                              "<b>", "- planregel: ", "</b>", sf_A1_tp_ipo$planregel, "<br>",
+                              "<b>", "- motivatie: ", "</b>", sf_A1_tp_ipo$motivatie, "<br>",
+                              "<b>", "- bron naam: ", "</b>", sf_A1_tp_ipo$sys_source, "<br>", 
+                              "<b>", "- bron datum: ", "</b>", sf_A1_tp_ipo$sys_date, "<br>", 
+                              "<b>", "- bron bestand: ", "</b>", sf_A1_tp_ipo$sys_file)) %>% 
+  addPolygons(data = sf_A1_sb_ipo, group = "AG'n Stationaire Bronnen IPO", 
+              color = ~ifelse(sf_A1_sb_ipo$ag_stof == "lpg",
+                              "#B91C14", "#FF1C14"), 
+              stroke = FALSE, fillOpacity = 0.5,
+              label = ~lbls_sb,
+              popup = ~paste0("<b>", sf_A1_sb_ipo$ag_gebied, "</b>", "<br>",
+                              "<b>", "- type_bron: ", "</b>", sf_A1_sb_ipo$ag_type, "<br>",
+                              "<b>", "- activiteit: ", "</b>", sf_A1_sb_ipo$ag_actor, "<br>",
+                              "<b>", "- rev_categorie: ", "</b>", sf_A1_sb_ipo$ag_revcat, "<br>",
+                              "<b>", "- planregel: ", "</b>", sf_A1_sb_ipo$planregel, "<br>",
+                              "<b>", "- motivatie: ", "</b>", sf_A1_sb_ipo$motivatie, "<br>",
+                              "<b>", "- bron naam: ", "</b>", sf_A1_sb_ipo$sys_source, "<br>", 
+                              "<b>", "- bron datum: ", "</b>", sf_A1_sb_ipo$sys_date, "<br>", 
+                              "<b>", "- bron bestand: ", "</b>", sf_A1_sb_ipo$sys_file)) %>% 
+  addPolygons(data = sf_loc_zkg, group = "Zeer kwestbare gebouwen", 
+              color = "#385723", stroke = FALSE, fillOpacity = 0.5,
+              label = ~paste0(sf_loc_zkg$naam, ": ", 
+                              sf_loc_zkg$straatnaam, " ", sf_loc_zkg$huisnrs),
+              popup = ~paste0("<b>", sf_loc_zkg$pandid, "</b>", "<br>",
+                              "<b>", "- naam: ", "</b>", sf_loc_zkg$naam, "<br>",
+                              "<b>", "- categorie: ", "</b>", sf_loc_zkg$categorie, "<br>",
+                              "<b>", "- status: ", "</b>", sf_loc_zkg$pandstatus, "<br>",
+                              "<b>", "- bouwjaar: ", "</b>", sf_loc_zkg$bouwjaar, "<br>",
+                              "<b>", "- oppervlak: ", "</b>", sf_loc_zkg$oppervlak, "<br>",
+                              "<b>", "- populatie: ", "</b>", sf_loc_zkg$populatie_, "<br>", 
+                              "<b>", "- bron naam: ", "</b>", sf_loc_zkg$sys_source, "<br>", 
+                              "<b>", "- bron datum: ", "</b>", sf_loc_zkg$sys_date, "<br>", 
+                              "<b>", "- bron bestand: ", "</b>", sf_loc_zkg$sys_file)) %>%  
+  addPolygons(data = sf_bwp, group = "Bouwplannen", 
+              color = "blue", stroke = FALSE, fillOpacity = 0.5,
+              label = ~paste0(sf_bwp$Project_ID, ": ", 
+                              sf_bwp$Projectnaam, " ", sf_bwp$Start_bouw),
+              popup = ~paste0("<b>", sf_bwp$Project_ID, "</b>", "<br>",
+                              "<b>", "- Fase: ", "</b>", sf_bwp$Fase, "<br>",
+                              "<b>", "- Projectnaam: ", "</b>", sf_bwp$Projectnaam, "<br>",
+                              "<b>", "- Fase_ID: ", "</b>", sf_bwp$Fase_ID, "<br>",
+                              "<b>", "- Fase: ", "</b>", sf_bwp$Fase, "<br>",
+                              "<b>", "- # Woningen: ", "</b>", sf_bwp$Totaal, "<br>",
+                              "<b>", "- Projectgebied: ", "</b>", sf_bwp$Projectgebied, "<br>", 
+                              "<b>", "- bron naam: ", "</b>", sf_bwp$sys_source, "<br>", 
+                              "<b>", "- bron datum: ", "</b>", sf_bwp$sys_date, "<br>", 
+                              "<b>", "- bron bestand: ", "</b>", sf_bwp$sys_file)) %>%  
+  addLegend(colors = c("#FF7B70", "#F4A63B", 
+                       "#FF1C14", "#B91C14", 
+                       "#385723", "blue"), 
+            labels = c("Buisleidingen", "Basisnet wegen", 
+                       "Overige Stationaire bronnen", "LPG-tankstations",
+                       "Zeer kwetsbaar gebouw", "Bouwplannen"),
+            opacity = 0.5, title = "Aandachtsgebieden & ZKG",
+            position = "topright") %>% 
+  addLayersControl(
+    baseGroups = c("basemap (OSM)"),
+    overlayGroups = c("AG'n Buisleidingen", 
+                      "AG'n Basisnet Weg IPO",
+                      "AG'n Stationaire Bronnen IPO",
+                      "Zeer kwestbare gebouwen", "Bouwplannen"),
+    options = layersControlOptions(collapsed = FALSE)) %>% 
+    hideGroup(c("AG'n Buisleidingen", 
+                      "AG'n Basisnet Weg IPO",
+                      "AG'n Stationaire Bronnen IPO",
+                      "Zeer kwestbare gebouwen", "Bouwplannen"))
+
+lf_A22
+
+```
+

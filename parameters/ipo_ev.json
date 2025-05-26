@@ -1,0 +1,22 @@
+{
+    "ipodata":[
+        {
+            "item":"quickscans",
+            "code":"NA",
+            "url_base":"https://nl.ev-signaleringskaart.nl/geoserver/quickscans/wfs",
+            "url_gcap":"https://nl.ev-signaleringskaart.nl/geoserver/quickscans/wfs?request=GetCapabilities&service=wfs&version=2.0.0",
+            "url_feat":"https://nl.ev-signaleringskaart.nl/geoserver/quickscans/wfs?request=GetFeature&service=wfs&typeName=&outputFormat=SHAPE-ZIP",
+            "url_hits":"https://nl.ev-signaleringskaart.nl/geoserver/quickscans/wfs?request=GetFeature&service=wfs&typeName=&resultType=hits&version=2.0.0",
+            "key":"NA"
+        },
+        {
+            "item":"kwetsbareobjecten",
+            "code":"NA",
+            "url_base":"https://nl.ev-signaleringskaart.nl/geoserver/kwetsbaarheid_objecten/wfs",
+            "url_gcap":"https://nl.ev-signaleringskaart.nl/geoserver/kwetsbaarheid_objecten/wfs?request=GetCapabilities&service=wfs&version=2.0.0",
+            "url_feat":"https://nl.ev-signaleringskaart.nl/geoserver/kwetsbaarheid_objecten/wfs?request=GetFeature&service=wfs&typeName=&outputFormat=SHAPE-ZIP",
+            "url_hits":"https://nl.ev-signaleringskaart.nl/geoserver/kwetsbaarheid_objecten/wfs?request=GetFeature&service=wfs&typeName=&resultType=hits&version=2.0.0",
+            "key":"NA"
+        }
+    ]
+}

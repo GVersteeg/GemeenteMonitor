@@ -1,0 +1,320 @@
+---
+title: "Inlezen REV-portaal Externe Veiligheid"
+author: "Gerrit Versteeg"
+date: "19/12/2024"
+output: pdf_document
+---
+
+## Introductie
+Dit script rapporteert het inlezen van geografische gegevens rond de externe veiligheid. Hierbinnen vallen:
+
+* Risico bronnen / Aandachtsgebieden  
+* Kwestbare objecten  
+
+
+## Ruwe WFS-layers aandachtsgebieden
+
+* Bron: https://rev-portaal.nl  
+* URL:  https://rev-portaal.nl/geoserver/wfs,  
+* Format: ZIP-file  
+* Periode: 2024  
+* Gebied: Nederland  
+* Datalake: ruwe_data/REV_RegExtVeiligheid/aandachtsgebieden  
+
+## Ruwe WFS-layers kwetsbare objecten
+
+* Bron: https://rev-portaal.nl  
+* URL:  https://rev-portaal.nl/geoserver/wfs,  
+* Format: ZIP-file  
+* Periode: 2024  
+* Gebied: Nederland  
+* Datalake: ruwe_data/REV_RegExtVeiligheid/kwetsbare_objecten  
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## -------------------------------------------------------------------------- #
+## ----------- housekeeping ------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## loading libraries -------------------------------------------------------- #
+library(jsonlite)
+library(tidyverse)
+library(sf)
+library(RCurl)
+library(XML)
+# library(ows4R)
+
+##--------------------------------------------------------------------------- #
+## sourcing relevant functions ---------------------------------------------- #
+##--------------------------------------------------------------------------- #
+source("../functions/analyzeWFS.R")
+
+## Folders and paths -------------------------------------------------------- #
+dir_parm <- "../parameters/"
+dir_base <- Sys.getenv("POS_DATALAKE")
+dir_base <- "~/link_datalake/Weert/"
+
+dir_raw <- paste0(dir_base, "ruwe_data/")
+dir_cln <- paste0(dir_base, "schone_data/")
+dir_raw_rev <- paste0(dir_raw, "REV_RegExtVeiligheid/")
+dir_raw_ag <- paste0(dir_raw_rev, "aandachtsgebieden")
+dir_raw_kg <- paste0(dir_raw_rev, "kwetsbare_objecten")
+dir_raw_gg <- paste0(dir_raw_rev, "hulplagen")
+dir_raw_geo <- paste0(dir_raw, "GeoBasis/")
+
+fname_geo_gem <- "/gemeenten/gemeenten2019.shp"
+fpath_geo_gem <- paste0(dir_raw_geo, fname_geo_gem)
+
+fname_parm <- "rev_ev.json"
+fpath_parm <- paste0(dir_parm, fname_parm)
+
+fname_raw_cap <- "rev_cap.xml"
+fpath_raw_cap <- paste0(dir_raw_rev, fname_raw_cap)
+fname_raw_capqs <- "rev_cap.xml"
+fpath_raw_capqs <- paste0(dir_raw_rev, fname_raw_cap)
+fname_raw_capkg <- "rev_cap_kg.xml"
+fpath_raw_capkg <- paste0(dir_raw_rev, fname_raw_capkg)
+fname_raw_ag <- "rev_ag.zip"
+fpath_raw_ag <- paste0(dir_raw_ag, "/", fname_raw_ag)
+fname_raw_kg <- "rev_kg.zip"
+# fname_raw_kg <- "rev_kg.txt"
+fpath_raw_kg <- paste0(dir_raw_kg, "/", fname_raw_kg)
+fname_raw_feat <- "rev_feat.zip"
+fpath_raw_feat <- paste0(dir_raw_rev, "/", fname_raw_feat)
+fname_raw_req <- "wfsrequest.txt"
+fpath_raw_req <- paste0(dir_raw_rev, "/", fname_raw_req)
+
+fname_tbl_rev <- "feature_table_rev.rds"
+fpath_tbl_rev <- paste0(dir_raw_rev, "/", fname_tbl_rev)
+
+```
+
+
+## Importeren
+
+### Inlezen ruwe data
+
+De bron is de geoserver van het REV, waarin bestanden beschikbaar zijn o.b.v. 
+een specfieke URL. Die URL's zijn vastgelegd in een JSON-bestand (rev_ev.json) 
+in de parameters folder.
+
+
+```{r read, echo=FALSE, warning=FALSE}
+## -------------------------------------------------------------------------- #
+## ----------- inlezen DATA vanuit EV-SIGNALERINGSKAART rev ----------------- #
+## -------------------------------------------------------------------------- #
+## ----------- data retrieval ----------------------------------------------- #
+##  -- 1. URL's inladen vanuit parameter-file rev_ev.json  ------------------
+## -------------------------------------------------------------------------- #
+rev_codes <- read_lines(fpath_parm) %>% 
+  fromJSON()
+rev_codes <- rev_codes$revdata
+url_base <- rev_codes$url_base[rev_codes$item == "features"]
+url_hits <- paste0(url_base,
+                  rev_codes$req_hits[rev_codes$item == "features"])
+url_cap <- paste0(url_base,
+                  rev_codes$req_gcap[rev_codes$item == "features"])
+url_names <- paste0(url_base,
+                  rev_codes$req_gcap[rev_codes$item == "fieldnames"])
+
+## Load secrets for data source --------------------------------------------- #
+#opts = curlOptions(userpwd = paste0(Sys.getenv("rev_user"),
+#                                    ":", Sys.getenv("rev_password")))
+
+## -------------------------------------------------------------------------- #
+## -- DEEL 0: INLADEN GEMEENTEGRENZEN ---------------------------------------
+## -------------------------------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## Data inladen rond gemeentegrens om een bounding box te maken ------------- #
+##  voor de gemente Den Haag, die we kunnen gebruiken bij het filteren ------ #
+##  van data uit de ev-signaleringskaart ------------------------------------ #
+##  We ronden af , zodat het filteren sneller kan verlopen (lijkt het) ------ #
+## -------------------------------------------------------------------------- #
+sf_gem <- read_sf(fpath_geo_gem) %>% 
+  filter(gemeentena == "Weert")
+x <- st_bbox(sf_gem)
+x[["xmin"]] <- round(x[["xmin"]], 0)
+x[["ymin"]] <- round(x[["ymin"]], 0)
+x[["xmax"]] <- round(x[["xmax"]]+1, 0)
+x[["ymax"]] <- round(x[["ymax"]]+1, 0)
+bb_wrt <- paste(as.integer(x), collapse = ",")
+
+## -------------------------------------------------------------------------- #
+## -- DEEL 1: KLAARZETTEN URL REQUEST VARIANTEN REV -------------------------
+## -------------------------------------------------------------------------- #
+req_type <- "request=GetFeature"
+req_serv <- "&service=wfs"
+req_name <- "&typeName="
+req_form <- "&outputFormat=SHAPE-ZIP"
+req_vers <- "&version=2.0.0"
+req_cnt <- "&count=30000"
+req_start <- "&startindex=1"
+gem_naam <- "'Weert'"
+req_filt <- paste0("&cql_filter=bronhoudercode=", gem_naam)
+req_bbox <- paste0("&BBOX=", bb_wrt)
+## -------------------------------------------------------------------------- #
+## -- DEEL 1: INLADEN GENERAL FEATURES -------------------------------------- #
+## -------------------------------------------------------------------------- #
+## Data inladen Capabilities voor hele REV-Portaal -------------------------- #
+## -------------------------------------------------------------------------- #
+error_download <- download.file(url_cap, destfile = fpath_raw_cap)
+stopifnot(error_download == 0) 
+
+## -------------------------------------------------------------------------- # 
+## --- xml_in --------- OPZETTEN DATAFAME MET BESCHIKBARE FEATURETYPES ------ #
+## -------------------------------------------------------------------------- # 
+## Bij XML altijd bestand eerst als binary file in geheugen lezen en dan 
+## deze file uit geheugen gaan parsen als XML (xmlParse / read_xml)
+## 1 - inlezen bestand als binary file in geheugen
+## 2 - inlezen XML-bestand voor gebruik met package XML
+## 3 - selecteren van de FeatureTypeList
+## -------------------------------------------------------------------------- # 
+xml_in <- read_file(fpath_raw_cap)
+data <- xmlParse(xml_in)
+lst_getcap <- xmlToList(data)
+lst_ftl <- lst_getcap$FeatureTypeList
+
+## start de bouw v.h. dataframe voor beschikbare FeatureTypes
+df_ftl <- data.frame(name = character(0),
+                 title = character(0),
+                 abstract = character(0),
+                 keyword_1 = character(0),
+                 keyword_2 = character(0),
+                 def_crs = character(0),
+                 bbox_lc = character(0),
+                 bbox_uc = character(0),
+                 attributes = character(0),
+                 gem_key = logical(0),
+                 nr_in_NL = integer(0),
+                 nr_in_GEM = integer(0),
+                 stringsAsFactors = FALSE)
+index <- c(1:length(lst_ftl))
+curfeat <- NA
+
+## loop voor het vullen van het dataframe voor beschikbare FeatureTypes
+i <- 1
+for (i in seq_along(index)) {
+#  vullen standaard feature specs
+  df_ftl[i,] <- NA
+  curfeat <- lst_ftl[i]
+  df_ftl$name[i] <- curfeat$FeatureType$Name
+  df_ftl$title[i] <- curfeat$FeatureType$Title
+  df_ftl$abstract[i] <- ifelse(is.null(curfeat$FeatureType$Abstract),"",
+                               curfeat$FeatureType$Abstract)
+  keywords <- unlist(curfeat$FeatureType$Keywords)
+  df_ftl$keyword_1[i] <- keywords[1]
+  df_ftl$keyword_2[i] <- keywords[2]
+  df_ftl$def_crs[i] <- curfeat$FeatureType$DefaultCRS
+  df_ftl$bbox_lc[i] <- curfeat$FeatureType$WGS84BoundingBox$LowerCorner
+  df_ftl$bbox_uc[i] <- curfeat$FeatureType$WGS84BoundingBox$UpperCorner
+
+#  vullen veldnamen in feature + detecteren of bronhoudercode in de veldnamen
+#  voorkomen && of het om een gemeentelijke code gaat (alleen bij KGL)
+  url_feat <- str_replace(url_names, "typeName=",
+                        paste0("typeName=", df_ftl$name[i]))
+  xml_names <- getURL(url_feat)
+  xml_data <- xmlParse(xml_names)
+  lst_names <- xmlToList(xml_data)
+  lst_names <- lst_names[["complexType"]][["complexContent"]][["extension"]][["sequence"]]
+  vec_names = c()
+  for (j in seq_along(lst_names)) {
+    velden <- lst_names[[j]]
+    veld <- velden[names(velden) == "name"]
+    vec_names <- c(vec_names, veld)
+  }
+  vec_names <- unname(vec_names)
+  gem_key <- str_detect(paste0(vec_names, collapse = "|"), 
+                        "bronhoudercode") & 
+             str_detect(curfeat$FeatureType$Name, "kgl")
+  df_ftl$attributes[i] <- list(vec_names)
+  df_ftl$gem_key[i] <- gem_key
+  
+#  vullen aantal voorkomens feature in NL en GEM-bbox
+  url_hits_NL <- str_replace(url_hits, "typeName=",
+                        paste0("typeName=",df_ftl$name[i]))
+  xml_hits_NL <- getURL(url_hits_NL)
+  xml_data <- xmlParse(xml_hits_NL)
+  lst_hits <- xmlToList(xml_data)
+  df_ftl$nr_in_NL[i] <- as.numeric(lst_hits[["numberMatched"]])
+#  url_hits_GEM <- paste0(url_hits_NL, req_filt)
+  url_hits_GEM <- paste0(url_hits_NL, req_bbox)
+  xml_hits_GEM <- getURL(url_hits_GEM)
+  xml_data <- xmlParse(xml_hits_GEM)
+  lst_hits <- xmlToList(xml_data)
+  df_ftl$nr_in_GEM[i] <- as.numeric(lst_hits[["numberMatched"]])
+}
+
+print(df_ftl)
+write_rds(df_ftl, fpath_tbl_rev)
+
+## -------------------------------------------------------------------------- #
+## -- DEEL 2: INLADEN KWETSBARE OBJECTEN ------------------------------------ #
+## -------------------------------------------------------------------------- #
+## Data inladen (alle features ophalen vanuit rev) -------------------------- #
+## Bij KGL_module en KGL_public krijgen we: "Dienst is tijdelijk niet ------- #
+##        bereikbaar, probeert u het later nog eens"
+## -------------------------------------------------------------------------- #
+url_base <- rev_codes$url_base[rev_codes$item == "features"]
+url_init <- paste0(url_base,
+                   rev_codes$req_feat[rev_codes$item == "features"])
+max_pg <- 30000
+req_count <- paste0("&count=", max_pg)
+
+i <-20
+for (i in seq_along(df_ftl$name)) {
+  nm_feat <- df_ftl$name[i]
+  nr_feat <- df_ftl$nr_in_GEM[i]
+  gem_key <- df_ftl$gem_key[i]
+  url_feat <- str_replace(url_init, "typeName=",
+                        paste0("typeName=", nm_feat))
+  nm_file <- paste0(str_split(nm_feat, ":")[[1]][2], ".shp")
+  nm_path <- paste0(dir_raw_rev, "/", nm_file)
+  url_feat_GEM <- if(gem_key) paste0(url_feat, req_filt) else paste0(url_feat, req_bbox)
+  writeBin(getBinaryURL(url_feat_GEM), fpath_raw_feat)
+  unzip(fpath_raw_feat, exdir = dir_raw_rev)
+  print(paste0(nm_feat, ": ", nr_feat))
+}
+file.remove(fpath_raw_feat)
+file.remove(fpath_raw_req)
+
+write_csv2(df_ftl, "rev_features.csv")
+
+## poging met filter i.p.v. BBOX
+gem_code <- "'GM0988'"
+req_filt <- paste0("&cql_filter=bronhoudercode=", gem_code)
+i <-20
+nm_feat <- df_ftl$name[i]
+nr_feat <- df_ftl$nr_in_GEM[i]
+url_feat <- str_replace(url_init, "typeName=",
+                        paste0("typeName=", nm_feat))
+nm_file <- paste0(str_split(nm_feat, ":")[[1]][2], ".shp")
+nm_path <- paste0(dir_raw_rev, "/", nm_file)
+url_feat_GEM <- paste0(url_feat, req_filt)
+writeBin(getBinaryURL(url_feat_GEM), fpath_raw_feat)
+unzip(fpath_raw_feat, exdir = dir_raw_rev)
+sf_public <- read_sf(paste0(dir_raw_rev, "kgl_publicPolygon.shp")) 
+sf_module <- read_sf(paste0(dir_raw_rev, "kgl_modulePolygon.shp")) 
+
+## get attribute names from feature
+gem_code <- "'GM0988'"
+req_filt <- paste0("&cql_filter=bronhoudercode=", gem_code)
+i <-1
+nm_feat <- df_ftl$name[i]
+nr_feat <- df_ftl$nr_in_GEM[i]
+url_feat <- str_replace(url_init, "typeName=",
+                        paste0("typeName=", nm_feat))
+url_feat <- str_replace(url_feat, "request=GetFeature",
+                        "request=DescribeFeatureType")
+url_feat <- str_replace(url_feat, "&outputFormat=SHAPE-ZIP","")
+nm_file <- paste0(str_split(nm_feat, ":")[[1]][2], ".shp")
+nm_path <- paste0(dir_raw_rev, "/", nm_file)
+error_download <- download.file(url_feat, destfile = "KGL_fields")
+stopifnot(error_download == 0) 
+
+error_download <- download.file(url_cap, destfile = fpath_raw_cap)
+stopifnot(error_download == 0) 
+
+
+```
+

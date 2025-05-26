@@ -1,0 +1,1395 @@
+---
+title: "Schonen ruwe data Externe Veiligheid"
+author: "Gerrit Versteeg"
+date: "14/02/2024"
+output: html_document
+---
+
+## 1. Housekeeping
+  
+```{r housekeeping, include=FALSE}
+
+## -------------------------------------------------------------------------- #
+## Setting up R Markdown options                                              #
+## -------------------------------------------------------------------------- #
+# We want to hide the code and only see the results
+knitr::opts_chunk$set(echo = F)
+# We don't want to see any warnings from our code
+knitr::opts_chunk$set (warning = F)
+# We don't want to see any messages
+knitr::opts_chunk$set(message = F)
+
+## -------------------------------------------------------------------------- #
+## Setting up Libraries                                                       #
+## -------------------------------------------------------------------------- #
+## std. leaflet versions do NOT work !! ------------------------------------- #
+# devtools::install_github("dmurdoch/leaflet@crosstalk4") 
+## -------------------------------------------------------------------------- #
+## d3scatter is not available on CRAN (yet does not render in dashboard ?? -- # devtools::install_github("jcheng5/d3scatter") 
+## -------------------------------------------------------------------------- #
+library(tidyverse)
+library(readxl)
+library(sf)
+
+# -----------------------------------------------------------------------------
+## ------------------------ fresh slate ---------------------------------------
+rm(list=ls())
+
+## -------------------------------------------------------------------------- #
+## Setting up parameters                                                      #
+## -------------------------------------------------------------------------- #
+## Switch for controling where the script actually runs:                      #
+## productieomgeving = RStudio Connect (set as variable within the content)   #
+## onderzoeksomgeving = RStudio Server Pro within the UDP                     #
+## ontwikkelomgeving = Possible local development environment outside of UDP  #
+## -------------------------------------------------------------------------- #
+context <- Sys.getenv("CONTEXT")
+
+## -------------------------------------------------------------------------- #
+## Setting up Housekeeping (filenames)                                        #
+## -------------------------------------------------------------------------- #
+fname_krb_ev <- "/EV_regels.xlsx"        ## totdat regels in KRB zijn opgenomen
+fname_geo_gem <- "/gemeenten2019.shp"
+#fname_geo_gem <- "/asd_geojson_lnglat.geojson"
+#fname_geo_gem <- "/gem_asd.geojson"
+#fname_geo_bwp <- "/asd_bouwplan.geojson"
+fname_rev_ag <- "/qs_aandachtsgebiedenPolygon.shp"
+#fname_rev_bag <- "/qs_aandachtsgebieden.shp"
+#fname_rev_eag <- "/a20a_qs_explosieaandachtsgebieden.shp"
+#fname_rev_czn <- "/a20b_qs_zones_c_ontplofbaar.shp"
+#fname_rev_gag <- "/a21_qs_gifwolkaandachtsgebieden.shp"
+#fname_rev_zkg <- "/kgl_module.shp"
+
+fname_cln_ag <- "aandachtsgebieden.rds"
+fname_cln_sb <- "stationaire_bronnen.rds"
+fname_cln_tp <- "wegen.rds"
+fname_cln_bl <- "buisleidingen.rds"
+fname_cln_krb <- "regels.rds"
+fname_cln_gem <- "gemeente.rds"
+fname_cln_bwp <- "bouwplan.rds"
+fname_cln_zkg <- "zkg.rds"
+fname_cln_mtr <- "maatregel.rds"
+fname_cln_lst <- "ev_raw_files.rds"
+
+## -------------------------------------------------------------------------- #
+## Setting up Housekeeping (data links)                                       #
+## -------------------------------------------------------------------------- #
+## dir_base <- Sys.getenv("POS_DATALAKE")
+dir_base <- "~/link_datalake/Weert/"
+dir_parm <- "../parameters"
+dir_cln <- paste0(dir_base, "schone_data/ExtVeil")
+dir_raw <- paste0(dir_base,"ruwe_data/")
+
+dir_raw_rev <- paste0(dir_raw,"REV_RegExtVeiligheid/")
+# dir_raw_rev_evs <- paste0(dir_raw_rev,"ev_signaleringskaart/")
+# dir_raw_rev_agn <- paste0(dir_raw_rev_evs,"aandachtsgebieden")
+# dir_raw_rev_zkg <- paste0(dir_raw_rev_evs,"kwetsbare_objecten")
+
+dir_raw_geo <- paste0(dir_raw,"GeoBasis/")
+dir_raw_geo_gem <- paste0(dir_raw_geo,"gemeenten")
+
+fpath_krb_ev <- paste0(dir_parm, fname_krb_ev)
+fpath_geo_gem <- paste0(dir_raw_geo_gem, fname_geo_gem)
+# fpath_geo_bwp <- paste0(dir_raw_geo_gem, fname_geo_bwp)
+fpath_rev_ag <- paste0(dir_raw_rev, fname_rev_ag)
+# fpath_rev_bag <- paste0(dir_raw_rev_agn, fname_rev_bag)
+# fpath_rev_eag <- paste0(dir_raw_rev_agn, fname_rev_eag)
+# fpath_rev_czn <- paste0(dir_raw_rev_agn, fname_rev_czn)
+# fpath_rev_gag <- paste0(dir_raw_rev_agn, fname_rev_gag)
+# fpath_rev_zkg <- paste0(dir_raw_rev_zkg, fname_rev_zkg)
+
+fpath_cln_ag <- paste0(dir_cln, "/", fname_cln_ag)
+fpath_cln_sb <- paste0(dir_cln, "/", fname_cln_sb)
+fpath_cln_tp <- paste0(dir_cln, "/", fname_cln_tp)
+fpath_cln_bl <- paste0(dir_cln, "/", fname_cln_bl)
+fpath_cln_krb <- paste0(dir_cln, "/", fname_cln_krb)
+fpath_cln_gem <- paste0(dir_cln, "/", fname_cln_gem)
+fpath_cln_bwp <- paste0(dir_cln, "/", fname_cln_bwp)
+fpath_cln_zkg <- paste0(dir_cln, "/", fname_cln_zkg)
+fpath_cln_mtr <- paste0(dir_cln, "/", fname_cln_mtr)
+fpath_cln_lst <- paste0(dir_cln, "/", fname_cln_lst)
+
+```
+
+## 2. Getting parameters, rules
+
+Inlezen KRB-regels, Contouren buurten en gemeente
+Schone regels en contouren worden in clean data weggeschreven
+
+```{r krb, include=FALSE}
+## -------------------------------------------------------------------------- #
+## ---- Bron: KRB Kernregistratie Beleid ------------------------------------ #
+## EV-regels ---------------------------------------------------------------- #
+tmp_pad <- fpath_krb_ev
+tmp_naam <- str_remove(fname_krb_ev, "/")
+df_krb <- readxl::read_xlsx(tmp_pad)
+
+## -------------------------------------------------------------------------- #
+## --- Comprimeren DF-KRB met beleidsregels en motivaties ------------------- #
+## -------------------------------------------------------------------------- #
+df_krb <- df_krb %>% 
+  filter(!str_detect(jur_bron, "Regels rond")) %>% 
+  mutate(key = paste0(jur_afk, "_", jur_art, "-", rev_cat, "_", rev_subcat,
+                     "_", zone_afk),
+         motivatie = if_else(is.na(motivatie), paste0(jur_bron, ": ", jur_art),
+                             motivatie))
+
+## --- Samennemen regels als er meerdere records per key zijn --------------- #
+x <-as.data.frame(table(df_krb$key)) %>%                ## vaststellen dubbelen
+  filter(Freq != 1)
+df_double <- df_krb %>%                                ## dubbelen opzij zetten
+     group_by(key) %>%
+     filter(n() > 1)
+df_single <- df_krb %>%                                 ## enkelen opzij zetten
+     group_by(key) %>%
+     filter(n() == 1)
+df_samen <- df_double %>%        ## klaarzetten records voor samengenomen var's
+  filter(!duplicated(key))
+
+for(i in seq_along(x$Var1)) {
+  ix_key <- as.character(x$Var1[i])
+  meting <- df_double$rev_meting[which(df_double$key == ix_key)]
+  regel <- df_double$regel[which(df_double$key == ix_key)]
+  for (j in seq_along(meting)) {
+    regel[j] <- ifelse(is.na(meting[j]), paste0(regel[j], " "), 
+                       paste0(meting[j], " dan: ", regel[j]))
+    }
+  df_samen$regel[i] <- paste(regel, collapse = " | ")
+}
+
+df_krb <- df_single %>% 
+  bind_rows(df_samen) %>% 
+  arrange(key) %>% 
+  ungroup()
+
+rm(x, df_double, df_single, df_samen)
+
+df_krb_br <- df_krb %>% 
+  filter(jur_type == "Beleidsregel")
+
+write_rds(df_krb, path = fpath_cln_krb)
+
+df_krb_br_ag <- df_krb_br %>%                ## beleidsregels aandachtsgebieden
+  filter(jur_zone == "Aandachtsgebied")
+df_krb_br_vsg <- df_krb_br %>%             ## beleidsregels voorschriftgebieden
+  filter(jur_zone == "Voorschriftengebied")
+
+df_krb_mr <- df_krb %>%                                    ## beleidsmaatrgelen
+  filter(jur_type == "Beleidsmaatregel")
+
+## -------------------------------------------------------------------------- #
+## ---- Bron: GEO Afdeling -------------------------------------------------- #
+# epsg:4326 is the WGS84 World Grid that Leaflet uses. Re-project to this --- #
+## Gemeenten ---------------------------------------------------------------- #
+tmp_pad <- fpath_geo_gem
+tmp_naam <- str_remove(fname_geo_gem, "/")
+sf_gem <- read_sf(tmp_pad) %>% 
+  st_transform(4326) %>% 
+  filter(gemeentena == "Weert") %>% 
+  mutate(sys_date = as.character(as.Date(file.mtime(tmp_pad))),
+         sys_source = "DH | WFS | GEO afdeling",
+         sys_file = tmp_naam) %>% 
+  select(sys_source, sys_date, sys_file, everything())
+if (sum(st_is_valid(sf_gem)) != nrow(sf_gem)) {
+  sf_gem <- st_make_valid(sf_gem)
+}
+
+write_rds(sf_gem, path = fpath_cln_gem)
+
+## Bouwplannen -------------------------------------------------------------- #
+# tmp_pad <- fpath_geo_bwp
+# tmp_naam <- str_remove(fname_geo_bwp, "/")
+# sf_bwp <- read_sf(tmp_pad) %>%
+#   st_transform(4326) %>%
+# #  filter(gemeentena == "Amsterdam") %>%
+#   mutate(sys_date = as.character(as.Date(file.mtime(tmp_pad))),
+#          sys_source = "ASD | WFS | GEO afdeling",
+#          sys_file = tmp_naam) %>%
+#   select(sys_source, sys_date, sys_file, everything())
+# if (sum(st_is_valid(sf_bwp)) != nrow(sf_bwp)) {
+#   sf_bwp <- st_make_valid(sf_bwp)
+# }
+# 
+# write_rds(sf_bwp, path = fpath_cln_bwp)
+
+```
+
+# 3. Schonen IPO EV-Signaleringskaart
+
+## 3a. Schonen Kwetsbare Gebouwen
+
+Inlezen Zeer kwetsbare gebouwen vanuit IPO EV-Signaleringskaart.
+Later wordt dit waarschijnlijk de ALO Atlas Leefomgeving binnen het REV
+Schone regels en contouren worden in clean data weggeschreven
+
+```{r clean_zkg, include=FALSE}
+## -------------------------------------------------------------------------- #
+## ---- Bron: IPO WFS EV-signaleringskaart ---------------------------------- #
+## -------------------------------------------------------------------------- #
+## Zeer kwetsbare gebouwen IPO ---------------------------------------------- #
+# tmp_pad <- fpath_rev_zkg
+# tmp_naam <- str_remove(fname_rev_zkg, "/")
+# sf_rev_zkg <- read_sf(tmp_pad) %>% 
+#   st_transform(4326) %>% 
+#   filter(gemnaam == "Amsterdam") %>% 
+#   mutate(sys_date = as.character(as.Date(file.mtime(tmp_pad))),
+#          sys_source = "IPO | WFS | EV-signaleringskaart",
+#          sys_file = tmp_naam) %>% 
+#   select(sys_source, sys_date, sys_file, everything())
+# if (sum(st_is_valid(sf_rev_zkg)) != nrow(sf_rev_zkg)) {
+#   sf_rev_zkg <- st_make_valid(sf_rev_zkg)
+# }
+# 
+
+## -------------------------------------------------------------------------- #
+## Fouten in naam kolom: UTF-8 niet goed gehanteerd door IpO
+## Nu handmatig, later vervangen "\" door " "
+## -------------------------------------------------------------------------- #
+
+# pre-processing: ensure that all characters are valid UTF-8 encoded
+# https://stackoverflow.com/questions/17291287/how-to-identify-delete-non-utf-8-characters-in-r
+# Encoding( x = sf_rev_zkg$categorie ) <- "UTF-8"
+# Encoding( x = sf_rev_zkg$activiteit ) <- "UTF-8"
+# Encoding( x = sf_rev_zkg$naam ) <- "UTF-8"
+# Encoding( x = sf_rev_zkg$straatnaam ) <- "UTF-8"
+
+# replace all non UTF-8 character strings with an empty space
+# sf_rev_zkg$categorie <- iconv( x = sf_rev_zkg$categorie, from = "UTF-8", to = "UTF-8", sub = "" )
+# sf_rev_zkg$activiteit <- iconv( x = sf_rev_zkg$activiteit, from = "UTF-8", to = "UTF-8", sub = "" )
+# sf_rev_zkg$naam <- iconv( x = sf_rev_zkg$naam, from = "UTF-8", to = "UTF-8", sub = "" )
+# sf_rev_zkg$straatnaam <- iconv( x = sf_rev_zkg$straatnaam, from = "UTF-8", to = "UTF-8", sub = "" )
+# 
+# write_rds(sf_rev_zkg, path = fpath_cln_zkg)
+
+```
+
+## 3b. Voorbereiden IPO Aandachtsgebieden
+
+```{r prepare_ag, include=FALSE}
+## -------------------------------------------------------------------------- #
+## ---- Bron: IPO WFS EV-signaleringskaart ---------------------------------- #
+## -------------------------------------------------------------------------- #
+## --- Meerdere REV-cat's --------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## Aandachtsgebieden REV ---------------------------------------------------- #
+tmp_pad <- fpath_rev_ag
+tmp_naam <- str_remove(fname_rev_ag, "/")
+naam <- fname_rev_ag
+sf_rev_ag <- read_sf(tmp_pad) %>% 
+  st_transform(4326) %>% 
+  mutate(sys_date = as.character(as.Date(file.mtime(tmp_pad))),
+         sys_source = "MinI&W | WFS | Register Ext.Veiligheid",
+         sys_file = tmp_naam) %>% 
+  select(sys_source, sys_date, sys_file, everything())
+if (sum(st_is_valid(sf_rev_ag)) != nrow(sf_rev_ag)) {
+  sf_rev_ag <- st_make_valid(sf_rev_ag)
+}
+
+sf_rev_ag <- st_intersection(sf_rev_ag, sf_gem) %>% 
+  select(-c(sys_source.1, sys_date.1, sys_file.1))
+
+## Brandaandachtsgebieden IPO ----------------------------------------------- #
+# tmp_pad <- fpath_rev_bag
+# tmp_naam <- str_remove(fname_rev_bag, "/")
+# naam <- fname_rev_bag
+# sf_rev_bag <- read_sf(tmp_pad) %>% 
+#   st_transform(4326) %>% 
+#   mutate(sys_date = as.character(as.Date(file.mtime(tmp_pad))),
+#          sys_source = "MinI&W | WFS | Register Ext.Veiligheid",
+#          sys_file = tmp_naam) %>% 
+#   select(sys_source, sys_date, sys_file, everything())
+# if (sum(st_is_valid(sf_rev_bag)) != nrow(sf_rev_bag)) {
+#   sf_rev_bag <- st_make_valid(sf_rev_bag)
+# }
+# 
+# sf_rev_bag <- st_intersection(sf_rev_bag, sf_gem) %>% 
+#   select(-c(sys_source.1, sys_date.1, sys_file.1))
+
+
+
+
+## Explosie-aandachtsgebieden IPO ------------------------------------------- #
+# tmp_pad <- fpath_rev_eag
+# tmp_naam <- str_remove(fname_rev_eag, "/")
+# sf_rev_eag <- read_sf(tmp_pad) %>% 
+#   st_transform(4326) %>% 
+# #  filter(gemeente == "Amsterdam") %>% 
+#   mutate(sys_date = as.character(as.Date(file.mtime(tmp_pad))),
+#          sys_source = "IPO | WFS | EV-signaleringskaart",
+#          sys_file = tmp_naam) %>% 
+#   select(sys_source, sys_date, sys_file, everything())
+# if (sum(st_is_valid(sf_rev_eag)) != nrow(sf_rev_eag)) {
+#   sf_rev_eag <- st_make_valid(sf_rev_eag)
+# }
+# 
+# sf_rev_eag <- st_intersection(sf_rev_eag, sf_gem) %>% 
+#   select(-c(sys_source.1, sys_date.1, sys_file.1, gemeente))
+
+## C-zones ontpofbaar aandachtsgebieden IPO --------------------------------- #
+# tmp_pad <- fpath_rev_czn
+# tmp_naam <- str_remove(fname_rev_czn, "/")
+# sf_rev_czn <- read_sf(tmp_pad) %>% 
+#   st_transform(4326) %>% 
+# #  filter(gemeente == "Amsterdam") %>% 
+#   mutate(sys_date = as.character(as.Date(file.mtime(tmp_pad))),
+#          sys_source = "IPO | WFS | EV-signaleringskaart",
+#          sys_file = tmp_naam) %>% 
+#   select(sys_source, sys_date, sys_file, everything())
+# if (sum(st_is_valid(sf_rev_czn)) != nrow(sf_rev_czn)) {
+#   sf_rev_czn <- st_make_valid(sf_rev_czn)
+# }
+# 
+# sf_rev_czn <- st_intersection(sf_rev_czn, sf_gem) %>% 
+#   select(-c(sys_source.1, sys_date.1, sys_file.1, gemeente))
+
+## Gifwolk aandachtsgebieden IPO -------------------------------------------- #
+# tmp_pad <- fpath_rev_gag
+# tmp_naam <- str_remove(fname_rev_gag, "/")
+# sf_rev_gag <- read_sf(tmp_pad) %>% 
+#   st_transform(4326) %>% 
+# #  filter(gemeente == "Amsterdam") %>% 
+#   mutate(sys_date = as.character(as.Date(file.mtime(tmp_pad))),
+#          sys_source = "IPO | WFS | EV-signaleringskaart",
+#          sys_file = tmp_naam) %>% 
+#   select(sys_source, sys_date, sys_file, everything())
+# if (sum(st_is_valid(sf_rev_gag)) != nrow(sf_rev_gag)) {
+#   sf_rev_gag <- st_make_valid(sf_rev_gag)
+# }
+# 
+# sf_rev_gag <- st_intersection(sf_rev_gag, sf_gem) %>% 
+#   select(-c(sys_source.1, sys_date.1, sys_file.1, gemeente))
+
+
+## Combineren en splitsen aandachtsgebieden naar type_bron ------------------ #
+# sf_rev_ag <- sf_rev_bag %>% 
+#   bind_rows(sf_rev_eag) %>% 
+#   bind_rows(sf_rev_czn) %>% 
+#   bind_rows(sf_rev_gag)
+# rm(sf_rev_eag, sf_rev_bag, sf_rev_czn, sf_rev_gag)
+
+## Standaardiseren naar standaard AG-record --------------------------------- #
+sf_ag_rev <- sf_rev_ag %>% 
+  mutate(ag_gebied = case_when(str_detect(featuretyp, "Brand") ~ 
+                                 "Brandaandachtsgebied",
+                            str_detect(featuretyp, "Gifwolk") ~ 
+                              "Gifwolkaandachtsgebied",
+                            str_detect(featuretyp, "Explosie") ~ 
+                              "Explosieaandachtsgebied",
+                             TRUE ~ "type AG niet gevonden"),
+         ag_gebied_afk = case_when(str_detect(ag_gebied, "Brand") ~ "BAG",
+                            str_detect(ag_gebied, "Civiel") ~ "CEAG-C",
+                            str_detect(ag_gebied, "Explosieaandacht") ~ "EAG",
+                            str_detect(ag_gebied, "Gifwolkaandacht") ~ "GAG",
+                             TRUE ~ as.character(NA)),
+         ag_type = case_when(str_detect(evactivite, "Basisnet") ~ "basisnetroute",
+                            str_detect(evactivite, "Buis") ~ "buisleiding",
+                            str_detect(evactivite, "Opslag") ~ 
+                              "stationaire bron",
+                            str_detect(evactivite, "Tanken") ~ 
+                              "stationaire bron",
+                            str_detect(evactivite, "Seveso") ~ 
+                              "stationaire bron",
+                             TRUE ~ "Hoofdcat REV niet gevonden"),
+         ag_type_afk = case_when(str_detect(ag_type, "basis") ~ "tp",
+                            str_detect(ag_type, "buis") ~ "bl",
+                            str_detect(ag_type, "stat") ~ "sb",
+                             TRUE ~ as.character(NA)),
+         ag_actor = case_when(str_detect(type_bron, "leiding") ~ "leiding",
+                            str_detect(type_bron, " weg") ~ "weg",
+                            str_detect(type_bron, "Ontplof") ~ "opslaglocatie",
+                            str_detect(type_bron, "Opslagtank") ~ "tank",
+                            str_detect(type_bron, "Brandstof") ~ "tankstation",
+                             TRUE ~ "type activiteit niet gevonden"),
+         ag_revcat = case_when(str_detect(rev_catego, "A1a") ~ "VII-A1a",
+                            str_detect(rev_catego, "A7") ~ "VII-A7",
+                            str_detect(rev_catego, "C") ~ "VII-C",
+                            str_detect(rev_catego, "D2") ~ "VII-D2",
+                            str_detect(rev_catego, "IX") ~ "IX-A",
+                             TRUE ~ "REV categorie niet gevonden"),
+         ag_subtype = case_when(str_detect(type_bron, "leiding") ~ "Buisleiding",
+                            str_detect(type_bron, " weg") ~ "Basisnet Weg",
+                            str_detect(type_bron, "Ontplof") ~ "Opslaglocatie",
+                            str_detect(type_bron, "Opslagtank") ~ "Opslagtank",
+                            str_detect(type_bron, "Brandstof") ~ "Opslagtank",
+                             TRUE ~ "REV subcategorie niet gevonden"),
+         ag_subtype_afk = case_when(str_detect(type_bron, "leiding") ~ "bl",
+                            str_detect(type_bron, " weg") ~ "tp",
+                            str_detect(type_bron, "Ontplof") ~ "ol",
+                            str_detect(type_bron, "Opslagtank") ~ "tk",
+                            str_detect(type_bron, "Brandstof") ~ "tk",
+                                 TRUE ~ as.character(NA)),
+         ag_stof = case_when(str_detect(rev_catego, "A1a") ~ "lpg",
+                            str_detect(rev_catego, "A7") ~ "propaan",
+                            str_detect(rev_catego, "C") ~ "NA",
+                            str_detect(rev_catego, "D2") ~ "aardgas",
+                            str_detect(rev_catego, "IX") ~ "explosief",
+                             TRUE ~ "type stof niet gevonden"),
+         ag_klasse = case_when(str_detect(rev_catego, "IX") ~ "ADR-klasse 1.3",
+                             TRUE ~ as.character(NA)),
+         ag_rsc = as.character(NA),
+         ag_key = paste0("Bkl_Bijlage " , ag_revcat, "_",
+                        ag_subtype, "_", ag_gebied_afk),
+         ag_buffer = as.character(NA), 
+         planregel = as.character(NA),
+         motivatie = as.character(NA),
+         in_id = as.character(NA),
+         in_var1 = as.character(featuretyp),
+         in_var2 = as.character(evactivite),
+         in_var3 = as.character(type_bron),
+         in_var4 = as.character(rev_catego),
+         in_var5 = as.character(Gemeentenaam),
+         in_var6 = as.character(od_werkgeb),
+         in_var7 = as.character(provincie),
+         in_var8 = as.character(NA),
+         in_var9 = as.character(NA),
+       in_var10 = as.character(NA),
+       in_var11 = as.character(NA),
+       in_var12 = as.character(NA),
+       in_var13 = as.character(NA),
+       in_var14 = as.character(NA),
+       in_var15 = as.character(NA)) %>% 
+  select(sys_source, sys_date, sys_file, ag_gebied, ag_gebied_afk,
+         ag_type, ag_type_afk, ag_actor, ag_subtype, ag_subtype_afk,
+         ag_stof, ag_klasse, ag_revcat, ag_rsc, ag_key, ag_buffer,
+         planregel, motivatie, 
+         in_id, in_var1, in_var2, in_var3, in_var4, in_var5,
+         in_var6, in_var7, in_var8, in_var9, in_var10, 
+         in_var11, in_var12, in_var13, in_var14, in_var15)
+
+```
+
+
+## 4. Schonen per REV-categorie
+
+We gaan uit van de teksten in:
+Besluit Kwaliteit Leefomgeving - geconsolideerde Staatsbladversie 279
+
+We gaan per Categorie uit het Register Externe Veiligheid de verschillende bronbestanden schonen, klassiceren en standaardiseren
+
+|---------|------------|------------|------|-----------------|------|
+| REV-cat | Stof       |Locatie     | Bron | Aandachtsgebied | Bron |
+|---------|------------|------------|------|-----------------|------|
+| VII-A1a | LPG        | sf_loc_lpg | ODH  | sf_ag_odh_lpg   | ODH  |
+|         | afleverpunt| sf_loc_lap | ODH  |                 |      |
+|         | tank       | sf_loc_ltk | ODH  |                 |      |
+|         | vulpunt    | sf_loc_lvp | ODH  |                 |      |
+|         |            |            |      |                 |      |
+| VII-A7  | Propaan    | sf_loc_prop| ODH  | sf_ag_odh_prop  | ODH  |
+| subcats | VII-B2     | VII-E3.3   |      | VII-E12b/c      |      |
+|         |            |            |      |                 |      |
+| VII-A8  | N2O2       | sf_loc_obt | ODH  | sf_ag_odh_obt   | ODH  |
+| VII-B5  | Waterstof  | sf_loc_h2  | ODH  | sf_ag_odh_h2    | ODH  |
+|         |            |            |      |                 |      |
+| VII-C   | Basisnet   | sf_loc_wgn | ODH  | sf_ag_rev_tp    | IPO  |
+|         |            |            |      | sf_ag_odh_hw200 | ODH  |
+|         |            |            |      | sf_ag_odh_hw355 | ODH  |
+|         |            |            |      | sf_ag_odh_kp200 | ODH  |
+|         |            |            |      | sf_ag_odh_kp355 | ODH  |
+|         |            |            |      | sf_ag_odh_plb   | ODH  |
+| POV-II  | Prov.Wegen |            |      |                 | ODH  |
+| GEM-RB  | Routering  | sf_loc_rte |      |                 | ODH  |
+|         | Ontheffing | sf_loc_ohr |      |                 | ODH  |
+|         | Gesloten.  | sf_loc_gvr |      |                 | ODH  |
+|         |            |            |      |                 |      |
+| VII-D2  | Buisleiding| sf_loc_bl  | ODH  | sf_ag_rev_bl    | IPO  |
+| VII-D2  | Afdeklaag  | sf_loc_afd | ODH  |                 |      |
+| VII-Dxx | Warmtenet  | sf_loc_wnl | PZH  |                 |      |
+|         |            |            |      |                 |      |
+| VII-E2  | Ammoniak   | sf_loc_kia | ODH  | sf_ag_odh_kia   | ODH  |
+| subcats | VII-B1     | VII-E3.1a  |      | VII-E12a        |      |
+| VII-E5  | GS verpakt | sf_loc_gsv | ODH  | sf_ag_odh_gsv   | ODH  |
+| subcats | VII-B3     | VII-A11a/b |      | VII-E5.1/2/3    |      |
+|         |            |            |      |                 |      |
+| VII-E7  | Gasdruk    | sf_loc_gdr | ODH  | sf_prc_odh_gdr  | ODH  |
+| subcats | VII-A1     |            |      |                 |      |
+|         |            |            |      |                 |      |
+| VII-E11 | Mijnbouw   | sf_loc_gs  | ODH  | sf_prc_odh_gti  | ODH  |
+| subcats | VII-A1     | sf_loc_gti |      |                 |      |
+|         |            |            |      |                 |      |
+| VIII-B  | Vuurwerk   | sf_loc_vwo | ODH  | sf_ag_odh_vwo   | ODH  |
+| IX-A    | Expl. 1.1  | sf_loc_exp | ODH  | sf_ag_odh_exp   | ODH  |
+| IX-B    | Expl. 1.3  | sf_loc_bkl | ODH  | sf_ag_odh_bkl   | ODH  |
+| IX-C    | Expl. 1.4  | sf_loc_exp | ODH  |                 | ODH  |
+|         |            |            |      |                 |      |
+|         | Stat.bron  |            |      | sf_ag_rev_sb    | IPO  |
+|         |            |            |      |                 |      |
+| EOS     | Energie OS | sf_loc_eos | ODH  |                 |      |
+| EON     | Eon-centr. | sf_loc_eon | ODH  | sf_ag_adh_eon   | ODH  |
+
+ps. Buisleidingen - Locaties van afdek maatregelen buisleidingen. Voor Buisleidingen en wegtransport gebruiken we IPO maar de locaties waar bronmaatregelen zijn genomen bij aardgasbuisleidingen (afdekken) halen we bij ODH  
+
+
+## 4a. VII-A1a LPG-Tankstations
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+A1a. Tanken van LPG
+
+*Activiteit*
+Het tanken van voertuigen of werktuigen met LPG, bedoeld in artikel 4.472 van het Besluit activiteiten leefomgeving.
+
+*Afstand plaatsgebonden risico*
+De afstanden, bedoeld in artikel 4.472c, eerste lid, van het Besluit activiteiten leefomgeving, voor zover de afstand, bedoeld in het tweede lid van dat artikel, geldt.
+
+*Afstand aandachtsgebieden*
+Voor het:  
+* a. brandaandachtsgebied: 60 m vanaf het vulpunt, de bovengrondse vloeistofvoerende leiding en pomp en het aansluitpunt van die leiding; en  
+* b. explosieaandachtsgebied: 160 m vanaf het vulpunt en de bovengrondse opslagtank
+
+------------------------------------------------------------
+
+Bronsysteem ODH - Regionale Risicokaart Haaglanden
+* Locaties afleverpunten - odh_loc_lap - /Tankstations/LPG-afleverpunt.shp
+* Locaties tank - odh_loc_ltk - /Tankstations/Locatie LPG-tank.shp
+* Locaties vulpunten - odh_loc_lvp - /Tankstations/Locatie LPG-vulpunt.shp
+* Aandachtsgebieden	- odh_ag_lpg - /Tankstations/LPG_aandachtsgebieden.shp
+
+
+```{r clean_VII_A1a, include=FALSE}
+## -------------------------------------------------------------------------- #
+## --- LPG (VII-A1a) -------------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## Locaties stationaire bronnen LPG-afleverpunt ODH ------------------------- #
+## -------------------------------------------------------------------------- #
+
+## -------------------------------------------------------------------------- #
+## Aandachtsgebieden stationaire bronnen LPG-tankstations ODH --------------- #
+## -------------------------------------------------------------------------- #
+## LPG Aandachtsgebieden  ODH ----------------------------------------------- #
+
+```
+
+
+## 4b. VII-A7: Opslagtanks Propaan
+
+Propaan komt in vier Bkl-artikelen voor: 
+* VII-A7: Zonder vgn-plicht, indien opslagtank meer dan 13m3  
+* VII-B2: Met vgn-plicht, indien opslagtank > 13m3 en < 50m3 en doorzet/jr < 600m3  
+* VII-E3.3: Met vgn-plicht, indien opslagtank > 13m3 en < 50m3 en doorzet/jr > 600m3 OF inhoud > 50 m3  
+* VII-E12b: Met vgn-plicht, indien insluitsysteem > 13m3 en < 50m3 en doorzet/jr > 600m3  
+* VII-E12c: Met vgn-plicht, indien insluitsysteem > 50 m3  
+
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+A7. Opslaan van propaan of propeen in opslagtanks
+
+*Activiteit*  
+Het opslaan van propaan of propeen in een opslagtank, bedoeld in artikel 4.896 van het Besluit activiteiten leefomgeving, als de activiteit niet als vergunningplichtig is aangewezen in artikel 3.22, eerste lid, van dat besluit.
+
+*Afstand plaatsgebonden risico*  
+De afstand, bedoeld in artikel 4.899, eerste lid, aanhef en onder b, tweede en derde lid, van het Besluit activiteiten leefomgeving, voor zover de afstand, bedoeld in het eerste lid, aanhef en onder b, of het tweede lid van dat artikel, geldt.  
+
+*Afstand aandachtsgebieden*
+De afstanden, bedoeld in tabel A.7.
+
+Tabel A.7
+|----------------------------------|----------|----------|
+|                                  | BAG in m | EAG in m |
+|----------------------------------|----------|----------|
+| Ondergrondse opslagtank vanaf    | 20       | geen     | 
+| bovengrondse vloeistofvoerende   |          |          | 
+| leiding, aansluitpunten van die. |          |          | 
+| leiding en pomp                  |          |          | 
+|----------------------------------|----------|----------|
+| Bovengrondse    Inhoud <= 5m3    | 20       | 30       | 
+| opslagtank:     Inhoud >  5m3    | 20       | 50       | 
+| vanaf vulpunt                    |          |          | 
+|----------------------------------|----------|----------|
+| >= 5 bevoorradingen/jr: vanaf vp | 60       | 160      | 
+|----------------------------------|----------|----------|
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+B2. Opslagtank voor gassen
+
+*Activiteit*
+Het opslaan van meer dan 13 m3 propaan of propeen in een opslagtank, bedoeld in artikel 3.22, eerste lid, aanhef en onder c, van het Besluit activiteiten leefomgeving, voor zover het gaat om het opslaan van ten hoogste 50 m3 met een jaarlijkse doorzet van ten hoogste 600 m3.
+
+*Afstand plaatsgebonden risico* 
+De afstanden, bedoeld in tabel B.2.
+
+*Afstand aandachtsgebieden*  
+Voor het:  
+* a. brandaandachtsgebied: 60 m vanaf het vulpunt, de bovengrondse vloeistofvoerende leiding, de aansluitpunten van die leiding en pomp; en  
+* b. explosieaandachtsgebied: 160 m vanaf het vulpunt en de bovengrondse opslagtank 
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+E3. Opslagtank voor gassen. 
+
+*Activiteit*
+3.3. Het opslaan in een opslagtank van meer dan 13 m3 propaan of propeen, bedoeld in artikel 3.22, eerste lid, aanhef en onder c, van het Besluit activiteiten leefomgeving, voor zover het gaat om het opslaan van:
+a. ten hoogste 50 m3 met een jaarlijkse doorzet van meer dan 600 m3; of
+b. meer dan 50 m3.
+
+*Afstand plaatsgebonden risico*  
+Te berekenen afstand  
+
+*Afstand aandachtsgebieden*  
+Te berekenen afstand  
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+E12. Andere insluitsystemen
+
+*Activiteit* 
+Elke andere milieubelastende activiteit die in hoofdstuk 3 van het Besluit activiteiten leefomgeving als vergunningplichtig is aangewezen, als van die activiteit onderdeel is het aanwezig hebben van een insluitsysteem, anders dan een koelinstallatie als bedoeld in bijlage I bij het Besluit activiteiten leefomgeving, een opslagtank als bedoeld in bijlage I bij dat besluit of een tankcontainer of verpakking die als opslagtank als bedoeld in bijlage I bij dat besluit wordt gebruikt, met:  
+* b. meer dan 13 m3 en ten hoogste 50 m3 propaan of propeen met een jaarlijkse doorzet van meer dan 600 m3;  
+* c. meer dan 50 m3 propaan of propeen;  
+
+------------------------------------------------------------
+
+Bronsysteem ODH - Regionale Risicokaart Haaglanden
+* Locaties afleverpunten - odh_loc_prop - /Propaantanks/Propaantanks.shp
+* Aandachtsgebieden	- odh_ag_prop - /Propaantanks/Aandachtsgebieden.shp
+
+
+```{r clean_VII_A7, include=FALSE}
+## --- Propaan (A7) --------------------------------------------------------- #
+## Locaties stationaire bronnen Propaan-tanks ODH --------------------------- #
+
+## -------------------------------------------------------------------------- #
+## Propaan Aandachtsgebieden  ODH ------------------------------------------- #
+## -------------------------------------------------------------------------- #
+
+```
+
+
+## 4c. VII-A8 Opslagtanks N2O2
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+A8. Opslaan van oxiderende en verstikkende gassen in opslagtanks
+
+*Activiteit*
+Het opslaan van zuurstof, stikstof, argon, kooldioxide, helium of lachgas in een opslagtank, bedoeld in artikel 4.902 van het Besluit activiteiten leefomgeving, als de activiteit niet als vergunningplichtig is aangewezen in artikel 3.22, eerste lid, van dat besluit.
+
+*Afstand plaatsgebonden risico*
+De afstand, bedoeld in artikel 4.905, eerste lid, aanhef en onder b, en tweede lid, van het Besluit activiteiten leefomgeving, voor zover de afstand, bedoeld in het eerste lid, aanhef en onder b, of derde lid van dat artikel, geldt.
+
+------------------------------------------------------------
+NB. Dus geen aandachtsgebieden !
+
+Bronsysteem ODH - Regionale Risicokaart Haaglanden
+* Locaties A8 - odh_loc_n2o2 - /OpslagBovengrondseTanks/Opslag gassen, cryogeen (Bijlage VII A8 Bkl).shp  
+* PRC's - odh_prc_n2o2 - /OpslagBovengrondseTanks/Veiligheidscontour.shp  
+
+Onderstaande bronbestanden blijken dubbel te zijn (bevatten zelfde records als VII-A8 bestand) - deze bestanden slaan we over om dubbeltelling te voorkomen:  
+* Locaties A9 - odh_loc_brg - /OpslagBovengrondseTanks/Opslag brandbaar (Bijlage VII A9 Bkl).shp  
+* Locaties overig - odh_loc_obt -	/OpslagBovengrondseTanks/Overige opslag.shp  
+
+
+```{r clean_VII_A8, include=FALSE}
+## --- Stikstof/Zuurstof Tanks (A8) ----------------------------------------- #
+## Locaties stationaire bronnen O2/N2 tanks ODH VII-A8 ---------------------- #
+
+## Alleen plaatsgebonden risicocontouren, geen AG's (Opslag Bovengrondse Tanks)
+
+```
+
+
+## 4d. VII-A9 Opslagtanks Brandbare vloeistoffen
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+A9. Opslaan van brandbare vloeistoffen anders dan diesel in bovengrondse opslagtanks. 
+
+*Activiteit*. 
+Het opslaan van vloeibare gevaarlijke stoffen van ADR-klasse 3 in een bovengrondse opslagtank, bedoeld in artikel 4.910 van het Besluit activiteiten leefomgeving, voor zover het gaat om het opslaan van polyesterhars, met uitzondering van opslagtanks die zijn geïnstalleerd voor 1 januari 2013.
+
+*Afstand plaatsgebonden risico*. 
+De afstand, bedoeld in artikel 4.914, eerste lid, aanhef en onder b, van het Besluit activiteiten leefomgeving, voor zover de afstand, bedoeld in het eerste lid, aanhef en onder b, of tweede lid van dat artikel, geldt.
+
+------------------------------------------------------------
+NB. Dus geen aandachtsgebieden !
+
+Onderstaande bronbestanden blijken dubbel te zijn (bevatten zelfde records als VII-A8 bestand) - deze bestanden (en daarmee, de hele VII-A9 categorie) slaan we over om dubbeltelling te voorkomen:  
+* Locaties A9 - odh_loc_brg - /OpslagBovengrondseTanks/Opslag brandbaar (Bijlage VII A9 Bkl).shp  
+* Locaties overig - odh_loc_obt -	/OpslagBovengrondseTanks/Overige opslag.shp  
+
+
+```{r clean_VII_A9, include=FALSE}
+## NB. De locaties hieronder komen overeen met de risicobronnen in 
+##     odh_loc_n2o2. Om dubbeltelling te voorkomen slaan we deze over
+##    
+## Locaties stationaire bronnen brandbare gassen tanks ODH VII-A9 ----------- #
+
+```
+
+## 4e. VII-E2: Ammoniak in koelinstallaties
+
+Ammoniak komt in vier Bkl-artikelen voor: 
+* VII-B1: Koelinstallatie met ammoniak  
+* VII-E2: Koelinstallatie met ammoniak  
+* VII-3.1a: Opslagtank Gassen  
+* VII-E12a: Andere insluitsystemen  
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+B1. Koelinstallatie met ammoniak
+
+*Activiteit*  
+Het exploiteren van een koelinstallatie met meer dan 1.500 kg ammoniak, bedoeld in artikel 3.16, eerste lid, aanhef en onder b, van het Besluit activiteiten leefomgeving, voor zover het gaat om:
+a. minder dan 10.000 kg ammoniak; en
+b. een binnendiameter van de vloeistofleiding naar de verdamper van ten hoogste 80 mm.
+
+*Afstand plaatsgebonden risico*  
+Voor:
+a. één koelinstallatie in een machinekamer: de afstanden, bedoeld in tabel B.1.1; en
+b. meer dan een koelinstallatie in een machinekamer: de afstanden, bedoeld in tabel B.1.2.
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+E2. Koelinstallatie met ammoniak
+
+*Activiteit*  
+Het exploiteren van een koelinstallatie met meer dan 1.500 kg ammoniak, bedoeld in artikel 3.16, eerste lid, aanhef en onder b, van het Besluit activiteiten leefomgeving, voor zover het gaat om:
+a. ten minste 10.000 kg ammoniak; of
+b. een binnendiameter van de vloeistofleiding naar de verdamper van meer dan 80 mm.
+
+*Afstand plaatsgebonden risico*  
+Te berekenen afstand, tenzij de berekende afstand kleiner is dan de afstand die volgens tabel B.1.1 geldt voor een installatie met dezelfde werktemperatuur en dezelfde opstellingsuitvoering. In dat geval geldt de afstand uit tabel B.1.1.
+
+*Afstand aandachtsgebieden*  
+Te berekenen afstand.
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+E3.1 Opslagtank voor gassen
+
+*Activiteit*  
+3.1. Het opslaan in een opslagtank van giftige of bijtende gassen van ADR-klasse 2, bedoeld in artikel 3.22, eerste lid, aanhef en onder a, van het Besluit activiteiten leefomgeving, voor zover het gaat om:
+a. meer dan 1.500 kg ammoniak; 
+
+*Afstand plaatsgebonden risico*  
+Te berekenen afstand.
+
+*Afstand aandachtsgebieden*  
+Te berekenen afstand.
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+E12a. Andere insluitsystemen
+
+*Activiteit*  
+Elke andere milieubelastende activiteit die in hoofdstuk 3 van het Besluit activiteiten leefomgeving als vergunningplichtig is aangewezen, als van die activiteit onderdeel is het aanwezig hebben van een insluitsysteem, anders dan een koelinstallatie als bedoeld in bijlage I bij het Besluit activiteiten leefomgeving, een opslagtank als bedoeld in bijlage I bij dat besluit of een tankcontainer of verpakking die als opslagtank als bedoeld in bijlage I bij dat besluit wordt gebruikt, met:
+a. meer dan 1.500 kg ammoniak;
+
+*Afstand plaatsgebonden risico*  
+Te berekenen afstand.
+
+*Afstand aandachtsgebieden*  
+Te berekenen afstand.
+
+
+```{r clean_VII_E2, include=FALSE}
+## --- Koelinstallaties met Ammoniak (VII-E2) ------------------------------- #
+## Locaties koelinstallaties tanks ------------------------------------------ #
+
+## Alleen plaatsgebonden risicocontouren, geen AG's (Koelinstallaties Ammoniak)
+
+```
+
+
+## 4f. VII-B5 Waterstof: opslag- en transportbedrijf, groothandel en containeroverslag en tankstation
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+
+*Activiteit*  
+Het tanken van voertuigen of werktuigen met waterstof, bedoeld in artikel 3.286, eerste lid, aanhef en onder f, van het Besluit activiteiten leefomgeving, of het bieden van gelegenheid voor het tanken van voertuigen of werktuigen met waterstof, bedoeld in artikel 3.297, aanhef en onder b, van dat besluit.
+
+*Afstand plaatsgebonden risico*   
+a. 30 m vanaf de tussenopslag, voor zover de waterstof wordt aangevoerd via een buisleiding of op de locatie wordt geproduceerd; en
+b. 35 m vanaf het vulpunt, voor zover de waterstof wordt aangevoerd met tanks.
+
+*Afstand aandachtsgebieden*  
+Voor het brandaandachtsgebied: 55 m vanaf de opslagtank.
+
+```{r clean_VII_B5, include=FALSE}
+## --- Waterstof tank(stations) (B5) ---------------------------------------- #
+## Locaties H2 tanks  ------------------------------------------------------- #
+
+## -------------------------------------------------------------------------- #
+## ---- Bron: ODH Handmatig Reg. Risicokrt ---------------------------------- #
+## Aandachtsgebieden H2 tanks ODH ------------------------------------------- #
+
+```
+
+
+## 4g. VII-E3: Opslagtank gassen
+
+Propaan komt in vier Bkl-artikelen voor: 
+* VII-E3.1b   
+* VII-E.32    
+* VII-E3.4    
+
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+3.1b Opslagtank voor gassen
+
+*Activiteit*  
+3.1. Het opslaan in een opslagtank van giftige of bijtende gassen van ADR-klasse 2, bedoeld in artikel 3.22, eerste lid, aanhef en onder a, van het Besluit activiteiten leefomgeving, voor zover het gaat om:
+b. meer dan 1 m3 andere giftige of bijtende gassen.
+
+3.2. Het opslaan in een opslagtank van gassen in de gevarenklasse acute toxiciteit, categorie 1, 2 of 3, bedoeld in bijlage I, deel 3, bij de CLP-verordening, bedoeld in artikel 3.22, eerste lid, aanhef en onder b, van het Besluit activiteiten leefomgeving, voor zover het gaat om meer dan 1 m3.
+
+3.4. Het opslaan in een opslagtank van brandbare gassen van ADR-klasse 2, bedoeld in artikel 3.22, eerste lid, aanhef en onder e, van het Besluit activiteiten leefomgeving, voor zover het gaat om meer dan 13 m3 acetyleen.
+
+*Afstand plaatsgebonden risico*  
+Te berekenen afstand.
+
+*Afstand aandachtsgebieden*  
+Te berekenen afstand.
+
+
+```{r clean_VII_E3, include=FALSE}
+
+## Bronbestanden van de ODH missen nog??
+
+```
+
+
+## 4h. VII-E5: Verpakte Gevaarlijke stoffen
+
+Verpakte gevaarlijke stoffen komen in vier Bkl-artikelen voor: 
+* VII-A11    
+* VII-B3    
+* VII-E5.1   
+* VII-E5.2    
+
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+VII-E5. Opslaan van gevaarlijke stoffen in verpakking
+
+*Activiteit*  
+5.1. Het in een opslagplaats opslaan van meer dan 1.500 l giftige of bijtende gassen van ADR-klasse 2 in gasflessen, bedoeld in artikel 3.28, aanhef en onder a, van het Besluit activiteiten leefomgeving.  
+
+5.2. Het in een opslagplaats opslaan van meer dan 1.500 l tot vloeistof verdichte gassen in de gevarenklasse acute toxiciteit, categorie 1, 2 of 3, bedoeld in bijlage I, deel 3, bij de CLP-verordening, in gasflessen, bedoeld in artikel 3.28, aanhef en onder g, van het Besluit activiteiten leefomgeving.  
+
+5.3. Het in een opslagplaats opslaan van 10.000 kg of meer in totaal van de gevaarlijke stoffen, bedoeld in artikel 3.27, eerste lid, van het Besluit activiteiten leefomgeving, bedoeld in artikel 3.28, aanhef en onder h, van dat besluit, voor zover het opslaan geheel of gedeeltelijk betrekking heeft op brandbare gevaarlijke stoffen met fluor-, chloor-, broom-, stikstof- of zwavelhoudende verbindingen, of zowel brandbare gevaarlijke stoffen als gevaarlijke stoffen met die verbindingen, met uitzondering van het opslaan van ten hoogste 30.000 kg per opslagplaats, voor korte tijd en in afwachting van aansluitend vervoer naar een vooraf bekende ontvanger, en voor zover het gaat om:
+a. een opslagplaats met een oppervlakte van meer dan 100 m2 en minder dan 2.500 m2 en voor zover het niet gaat om een geval waarvoor afstanden zijn vastgesteld in tabel B.3;
+b. een opslagplaats met een oppervlakte van meer dan 2.500 m2; of
+c. verpakkingseenheden van meer dan 100 kg met een stof van ADR-klasse 6.1, verpakkingsgroep I, die in de open lucht worden gelost of geladen.
+
+*Afstand plaatsgebonden risico*  
+Te berekenen afstand.
+
+*Afstand aandachtsgebieden*  
+Te berekenen afstand.
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+VII-A11. Opslaan van gevaarlijke stoffen in verpakking
+
+*Activiteit*  
+Het opslaan van gevaarlijke stoffen in verpakking, met uitzondering van gevaarlijke stoffen van ADR-klasse 5.2, bedoeld in artikel 4.1004 van het Besluit activiteiten leefomgeving, voor zover het gaat om het opslaan in een opslagplaats waar meer dan:
+a. 2.500 kg gevaarlijke stoffen in verpakking, met uitzondering van gevaarlijke stoffen van ADR-klasse 2 in gasflessen, wordt opgeslagen, als in de opslagplaats brandbare stoffen van ADR-klasse 3, 4.1, 4.2 of 4.3 worden opgeslagen; of
+b. 1.000 l brandbare gassen van ADR-klasse 2 in gasflessen wordt opgeslagen in een opslagplaats in de buitenlucht.
+
+*Afstand plaatsgebonden risico*  
+De afstand, bedoeld in artikel 4.1008, eerste lid, aanhef en onder b, en tweede lid, aanhef en onder b, van het Besluit activiteiten leefomgeving, voor zover de afstand, bedoeld in het eerste lid, aanhef en onder b, of tweede lid, aanhef en onder b, of derde lid van dat artikel, geldt.
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+VII-B3. Opslaan van gevaarlijke stoffen in verpakking
+
+*Activiteit*  
+Het in een opslagplaats opslaan van 10.000 kg of meer in totaal van de gevaarlijke stoffen, bedoeld in artikel 3.27, eerste lid, van het Besluit activiteiten leefomgeving, bedoeld in artikel 3.28, aanhef en onder h, van dat besluit, voor zover het opslaan geheel of gedeeltelijk betrekking heeft op brandbare gevaarlijke stoffen met fluor-, chloor-, broom-, stikstof- of zwavelhoudende verbindingen, of zowel brandbare gevaarlijke stoffen als gevaarlijke stoffen met die verbindingen, met uitzondering van het opslaan van verpakkingseenheden van meer dan 100 kg met een stof van ADR-klasse 6.1, verpakkingsgroep I, die in de openlucht worden gelost of geladen, en voor zover het gaat om:
+a. het opslaan van ten hoogste 30.000 kg per opslagplaats, voor korte tijd en in afwachting van aansluitend vervoer naar een vooraf bekende ontvanger;
+b. in een opslagplaats met een oppervlakte van ten hoogste 100 m2; of
+c. in een opslagplaats met een oppervlakte van meer dan 100 m2 en ten hoogste 2.500 m2, en voor zover het gaat om het in tabel B.3 bedoelde:
+1°. stikstofgehalte van de totale hoeveelheid gevaarlijke stoffen in de opslagplaats, met uitzondering van minerale anorganische meststoffen, berekend volgens bij ministeriële regeling gestelde regels; of
+2°. blussysteem.
+
+*Afstand plaatsgebonden risico*  
+De afstand vanaf de opslagplaats:
+a. voor zover het gaat om het opslaan van ten hoogste 30.000 kg per opslagplaats, gedurende korte tijd en in afwachting van aansluitend vervoer naar een vooraf bekende ontvanger: 20 m; en
+b. voor zover het gaat om het opslaan op andere wijze: de afstanden, bedoeld in tabel B.3.
+
+
+```{r clean_VII_E5, include=FALSE}
+## --- PGS15 - Gevaarlijke stoffen in verpakkingen (E5) --------------------- #
+## Locaties H2 tanks  ------------------------------------------------------- #
+
+
+## -------------------------------------------------------------------------- #
+## ---- Bron: ODH Handmatig Reg. Risicokrt ---------------------------------- #
+## Aandachtsgebieden H2 tanks ODH ------------------------------------------- #
+
+```
+
+
+## 4i. VII-E7: Gasdrukregelstations
+
+Gasdrukregelstations komen in twee Bkl-artikelen voor: 
+* VII-A1    
+* VII-E7    
+
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+VII-E7. Behandelen, regelen en meten van aardgas
+
+*Activiteit*  
+Het behandelen van aardgas, het regelen van aardgasdruk of het meten van de hoeveelheid of kwaliteit van aardgas, voor zover die activiteiten worden verricht in een installatie met een gastoevoerleiding met een diameter van meer dan 50,8 cm, bedoeld in de artikelen 3.97 en 3.98, aanhef en onder b, van het Besluit activiteiten leefomgeving.
+
+*Afstand plaatsgebonden risico*  
+Te berekenen afstand.
+
+*Afstand aandachtsgebieden*  
+Te berekenen afstand.
+
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+VII-A1. Behandelen, regelen en meten van aardgas
+
+*Activiteit*  
+Het behandelen van aardgas, het regelen van aardgasdruk of het meten van de hoeveelheid of kwaliteit van aardgas, als de werkdruk aan de inlaatzijde ten hoogste 10.000 kPa is en de gastoevoerleiding een diameter heeft van ten hoogste 50,8 cm, bedoeld in artikel 3.97, eerste lid, van het Besluit activiteiten leefomgeving.
+
+*Afstand plaatsgebonden risico*  
+De afstanden, bedoeld in artikel 4.421, eerste lid, onder b, en tweede lid, van het Besluit activiteiten leefomgeving, voor zover de afstand, bedoeld in het eerste lid, onder b, van dat artikel geldt.
+
+
+```{r clean_VII_E7, include=FALSE}
+## --- Gasdrukregelstations (A1) -------------------------------------------- #
+## Locaties Gasdrukregelstations ODH ---------------------------------------- #
+
+## Alleen plaatsgebonden risicocontouren, geen AG's (PR 10_6)
+
+```
+
+
+## 4j. VIII-B: Vuurwerk opslag
+
+Vuurwerk opslag komt in twee Bkl-artikelen voor: 
+* VIII-A    
+* VIII-B    
+
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------  
+VIII-A. Explosieaandachtsgebied vuurwerk voor opslag van categorie F4
+
+|------------------------------|--------------------------------------------|
+| Hoeveelheid vuurwerk         | Afstand vanaf bewaarplaats                 |
+| (NEM in kg)                  | en bewerkingsruimte (in m)                 |
+|------------------------------|--------------------------------------------|
+| 0 tot en met 750             | 400                                        |
+| 750 tot en met 6.000         | 800                                        |
+|------------------------------|--------------------------------------------|
+
+VIII-B. Explosieaandachtsgebied vuurwerk voor opslag van vuurwerk van categorie F1, F2 of F3 of pyrotechnische artikelen voor theatergebruik van categorie T1 of T2
+
+----------- Inspectie Leefomgeving en Transport (ILT) -----------------------  
+*Categorieën vuurwerk*
+De Europese Pyrorichtlijn verdeelt vuurwerk in de volgende categorieën:
+
+* Categorie F1: vuurwerk met zeer weinig gevaar, is ook binnenshuis te gebruiken ( fop- en schertsvuurwerk);  
+* Categorie F2 : vuurwerk met weinig gevaar (geschikt voor particulier gebruik);  
+* Categorie F3: vuurwerk met middelmatig gevaar (meestal alleen bestemd voor professioneel gebruik);  
+* Categorie F4: vuurwerk dat veel gevaar oplevert en uitsluitend bestemd is voor professioneel gebruik.  
+
+De  Regeling aanwijzing consumenten- en theatervuurwerk (RACT) bepaalt welk vuurwerk consumenten mogen kopen.
+
+
+```{r clean_VIII_B, include=FALSE}
+## --- Vuurwerk opslag (Bijlage VIII A en B) -------------------------------- #
+## Locaties vuurwerkopslag  ------------------------------------------------- #
+
+## Aandachtsgebieden Vuurwerkopslag ODH ------------------------------------- #
+
+```
+
+## 4k. IX-ABC: Explosieven opslag
+
+Opslag explosieve stoffen komen in drie Bkl-artikelen voor: 
+* IX-A: Scherfwerking Massa-explosie    
+* IX-B: Hittewerking Brand     
+* IX-c: Munitie     
+
+
+---------- Besluit Kwaliteit Leefomgeving ------------------------------------
+IX-A. Civiele explosieaandachtsgebieden voor opslag van stoffen van ADR-klasse 1.1
+
+|-----------------|----------------|---------------|---------------|
+| NEM tot en met  | Civiel EAG A   | Civiel EAG B  | Civiel EAG C  |
+| (in kg).        | in m           | in m          | in m          |
+|-----------------|----------------|---------------|---------------|
+| 14,1            | 41             | 62            | 124           |
+| 25              | 87             | 130           | 260           |
+| 50              | 141            | 212           | 424           |
+| 75              | 173            | 260           | 520           |
+| 100             | 196            | 294           | 588           |
+| 125             | 214            | 321           | 642           |
+| 150             | 228            | 342           | 684           |
+| 175             | 240            | 360           | 720           |
+| 200             | 251            | 376           | 752           |
+| 5.000           | 254            | 381           | 762           |
+| 6.000           | 270            | 405           | 810           |
+|-----------------|----------------|---------------|---------------|
+
+IX-B. Civiele explosieaandachtsgebieden voor opslag van stoffen van ADR-klasse 1.3
+
+|-----------------|----------------|---------------|
+| NEM tot en met  | Civiel EAG A   | Civiel EAG B  |
+| (in kg).        | in m           | in m          |
+|-----------------|----------------|---------------|
+| 50              | 16             | 24            |
+| 100             | 20             | 30            |
+| 150             | 23             | 34            |
+| 200             | 25             | 37            |
+| 250             | 27             | 40            |
+| 300             | 29             | 43            |
+| 350             | 30             | 45            |
+| 400             | 31             | 47            |
+| 450             | 33             | 49            |
+| 500             | 34             | 51            |
+| 550             | 35             | 51            |
+| 600             | 36             | 54            |
+| 650             | 37             | 55            |
+| 700             | 38             | 57            |
+| 750             | 39             | 58            |
+| 800             | 39             | 59            |
+| 850             | 41             | 61            |
+| 900             | 41             | 61            |
+| 950             | 42             | 63            |
+| 1.000           | 43             | 64            |
+|-----------------|----------------|---------------|
+
+C. Civiele explosieaandachtsgebieden voor opslag van stoffen van ADR-klasse 1.4
+
+|--------------------------------------------------|---------------------|
+| Eenheid                                          | Civiel EAG B (in m) |
+|--------------------------------------------------|---------------------|
+| > 50 kg NEM noodsignalen                         | 20                  |
+| > 250.000 munitiepatronen of                     |                     |
+|           hagelpatronen voor vuurwapens          |                     |
+| > 250.000 patronen voor schiethamers             |                     |
+|--------------------------------------------------|---------------------|
+
+
+*Notities rond Bijlage IX Explosieven*
+
+| ---------------------------------| -------------- | ------- |----------- | 
+| Naam                             | REV            | ADR     | Type AG    |
+| ---------------------------------| -------------- | ------- |----------- | 
+| TNO                              | IX-A           | ADR 1.1 | CEAG-A/B/C | 
+| Loc: Niet gevonden               |                |         |            |
+| AG: OE/Veiligheidscontouren      |                |         |            |
+| ---------------------------------| -------------- | ------- |----------- | 
+| NFI                              | IX-A           | ADR 1.1 | CEAG-A/B/C |
+| Loc: Centr OE/gebouwgedeelte     | sf_loc_exp     |         |            |
+| AG: OE/Veiligheidscontouren      | sf_ag_odh_exp  |         |            |
+| ---------------------------------| -------------- | ------- |----------- | 
+| NIBG                             | IX-B           | ADR 1.3 | CEAG-B     |
+| Loc: Niet gevonden               | sf_loc_exp     |         |            |
+| AG: BKLO/Aandachtsgebieden       | sf_ag_odh_exp  |         |            |
+| ---------------------------------| -------------- | ------- |----------- | 
+| SVV - Schietvereningen           | IX-C           | ADR 1.4 | CEAG-B     |
+| Loc: OE/Locaties                 | sf_loc_exp     |         |            |
+| AG: Niet gevonden                | sf_ag_odh_exp  |         |            |
+| ---------------------------------| -------------- | ------- |----------- | 
+| Politie-academie                 | IX-C           | ADR 1.4 | CEAG-B     |
+| Loc: OE/Locaties                 | sf_loc_exp     |         |            |
+| AG: Niet gevonden                | sf_ag_odh_exp  |         |            |
+| ---------------------------------| -------------- | ------- |----------- | 
+| Beslaghuis Politie               | IX-C           | ADR 1.1 | CEAG-B     |
+| Loc: OE/Locaties                 | sf_loc_exp     | 1.2 1.3 |            |
+| AG: Niet gevonden                | sf_ag_odh_exp  | 1.4     |            |
+| ---------------------------------| -------------- | ------- |----------- | 
+
+OE = ODH-folder: OpslagExplosieven 
+BKLO = ODH-folder: BKL_Overige
+NIBG: Volgens IPO is dit een Civiel EAG type B voor ADR-klasse 1.3 (ODH zegt dat een BAG is)
+
+
+```{r clean_IX, include=FALSE}
+## --- Explosieven opslag (Bijlage IX A, B en C) ---------------------------- #
+## Locaties explosieven opslag  ------------------------------------------------- #
+
+## Afleiden Locaties explosieven opslag NFI via gebouwgedeelte -------------- #
+
+## Locaties explosieven opslag BKL_overig ----------------------------------- #
+
+## Aandachtsgebieden explosieven opslag  ------------------------------------ #
+
+## Aandachtsgebieden explosieven BKL-overig opslag  ------------------------ #
+
+```
+
+
+## 4g. VII-C Basisnet Wegen
+
+VII-C. Activiteiten met bij ministeriële regeling vastgestelde afstanden voor het plaatsgebonden risico
+
+Basisnet
+
+*Activiteit*  
+Het vervoer van gevaarlijke stoffen als bedoeld in artikel 1 van de Wet vervoer gevaarlijke stoffen over het basisnet.  
+
+*Afstand plaatsgebonden risico*  
+De afstand tot de locaties, bedoeld in artikel 14, eerste lid, van de Wet vervoer gevaarlijke stoffen. De afstand geldt vanaf de locaties die bij ministeriële regeling zijn aangewezen.  
+
+*Afstand aandachtsgebieden*  
+Voor de wegen, spoorwegen en binnenwateren die bij ministeriële regeling zijn aangewezen voor het:
+* a. brandaandachtsgebied: 30 m; en  
+* b. explosieaandachtsgebied: 200 m  
+
+De afstand geldt vanaf de locaties die bij ministeriële regeling zijn aangewezen.
+
+*Notities Bijlage VII-C Wegen*  
+Basisnet Wegen: Bron IPO  
+Provinciale wegen: Bron ODH  
+Gemeentelijk routeringsbesluit: Bron ODH  
+
+
+```{r clean_VII_C, include=FALSE}
+## -------------------------------------------------------------------------- #
+## ---- Bron: ODH Handmatig Reg. Risicokrt ---------------------------------- #
+## -------------------------------------------------------------------------- #
+## --- VII-C: WEGTRANSPORT -------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## 200 meter zones Hoofdwegen ODH ------------------------------------------- #
+
+## -------------------------------------------------------------------------- #
+## --- VII-C: WEGTRANSPORT -------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## 355 meter zones Hoofdwegen ODH ------------------------------------------- #
+
+## -------------------------------------------------------------------------- #
+## --- VII-C: WEGTRANSPORT -------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## 200 meter zones Knooppunten ODH ------------------------------------------ #
+
+## -------------------------------------------------------------------------- #
+## --- VII-C: WEGTRANSPORT -------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## 355 meter zones Knooppunten ODH ------------------------------------------ #
+
+## -------------------------------------------------------------------------- #
+## --- VII-C: WEGTRANSPORT -------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## Plasbrand aandachtsgebieden  ODH ----------------------------------------- #
+
+## 1% Letaal-zones EON-centrale ODH RRK ------------------------------------- #
+
+## 10-6 plaatsgebonden risicocontour EON-centrale ODH RRK ------------------- #
+
+```
+
+## 5. Schonen Locaties Risicobronnen
+
+```{r clean_loc, include=FALSE}
+
+## --- Energieopslagsystemen (??) ------------------------------------------- #
+## Locaties EOS ODH RRK ----------------------------------------------------- #
+
+## --- Energie centrales (??) ----------------------------------------------- #
+## Locaties EON-centrale ODH RRK -------------------------------------------- #
+
+```
+
+## 5. Schonen Wegen
+
+```{r clean_weg}
+
+## --- ROUTERING ------------------------------------------------------------ #
+## Routering routeplichtige stoffen ODH ------------------------------------- #
+
+## Gesloten verklaring routeplichtige stoffen ODH --------------------------- #
+
+## Ontheffingsroutes LPG-stations routeplichtige stoffen ODH ---------------- #
+
+## Basisnet Hoofdwegen afgeleid van contouren groepsrisico's ODH ------------ #
+
+## Basisnet Knooppunten afgeleid van contouren groepsrisico's ODH ----------- #
+
+```
+
+
+## 6. Schonen Leidingen
+
+```{r clean_leiding}
+
+## Aardgas buisleidingen ODH ------------------------------------------------ #
+
+## -------------------------------------------------------------------------- #
+## ---- Bron: Prov. Zuid-Holland Open data portaal -------------------------- #
+## -------------------------------------------------------------------------- #
+## --- We gebruiken van het Prov ZH:                                      --- #
+## ---   * Warmtenet leidingen (RevCat A1a)                               --- #
+## ---                                                                    --- #
+## -------------------------------------------------------------------------- #
+## Warmtenet leidingen Prov. Zuid-Holand ------------------------------------ #
+
+```
+
+
+
+## 7. Schonen Maatregelen
+
+```{r clean_mtr, include=FALSE}
+## -------------------------------------------------------------------------- #
+## ---- Bron: ODH Handmatig Reg. Risicokrt ---------------------------------- #
+## -------------------------------------------------------------------------- #
+## --- Buisleidingen (D2) --------------------------------------------------- #
+## Locaties afdeklagen aardgasleidingen ODH --------------------------------- #
+
+```
+
+
+## 8. Combineren dataframes tot clean files
+
+```{r combine, include=FALSE}
+
+## --- Combineren locaties stationaire bronnen ------------------------------ #
+# sf_loc_sb <- sf_loc_lpg %>% 
+#   bind_rows(sf_loc_prop,
+#             sf_loc_n2o2,
+#             sf_loc_brg,
+#             sf_loc_obt,
+#             sf_loc_h2,
+#             sf_loc_gsv,
+#             sf_loc_kia,
+#             sf_loc_eos,
+#             sf_loc_eon,
+#             sf_loc_vwo,
+#             sf_loc_exp,
+#             sf_loc_gdr)
+# write_rds(sf_loc_sb, path = fpath_cln_sb)
+# rm(sf_loc_prop, sf_loc_n2o2, sf_loc_brg, sf_loc_obt, sf_loc_h2, sf_loc_gsv,
+#             sf_loc_kia, sf_loc_eos, sf_loc_eon, sf_loc_vwo,
+#             sf_loc_exp, sf_loc_gdr)
+
+## --- Combineren locaties wegen en leidingen ------------------------------- #
+
+
+## --- Combineren locaties maatregelen -------------------------------------- #
+
+## --- Combineren aandachtsgebieden ----------------------------------------- #
+sf_ag <- sf_ag_rev                        ## aandachtsgebieden IPO EAG en BAG #
+
+# sf_ag <- sf_ag_rev %>%                    ## aandachtsgebieden IPO EAG en BAG #
+#   bind_rows(sf_ag_odh_hw200,                           ## Hoofdwegen 200m EAG #
+#             sf_ag_odh_hw355,                           ## Hoofdwegen 355m EAG #
+#             sf_ag_odh_kp200,                          ## Knooppunten 200m EAG #
+#             sf_ag_odh_kp355,                          ## Knooppunten 366m EAG #
+#             sf_ag_odh_plb,               ## Plasbrandaandachtsgebiden 30m EAG #
+#             sf_ag_odh_lpg,                            ## LPG-tanks EAG en BAG #
+#             sf_ag_odh_prop,                       ## Propaan-tanks EAG en BAG #
+#             sf_ag_odh_h2,                       ## Waterstof-tanks EAG en BAG #
+#             sf_ag_odh_gsv,                       ## Gev.stoffen in verpakking #
+#             sf_ag_odh_exp,                                 ## Explosieven EAG #
+#             sf_ag_odh_kia,                       ## Koelinstallaties Ammoniak #
+#             sf_ag_odh_gdr,                            ## Gasdrukregelstations #
+#             sf_ag_odh_eon,                      ## Energiecentrale EAG en BAG #
+#             sf_ag_odh_obt,           ## Overige Bovengrondse tanks EAG en BAG #
+#             sf_ag_odh_vwo)                                    ## Vuurwerk EAG #
+
+write_rds(sf_ag, path = fpath_cln_ag)
+# rm(sf_ag_rev, sf_ag_odh_lpg, sf_ag_odh_prop, sf_ag_odh_h2, sf_ag_odh_gsv,
+#    sf_ag_odh_bkl, sf_ag_odh_eon, sf_ag_odh_exp, sf_ag_odh_obt,
+#    sf_ag_odh_vwo, sf_ag_odh_plb, sf_ag_odh_rte)
+
+```
+
+
+
+## 9. Maken table met bronbestanden EV
+
+```{r Setup_Filetable}
+
+df_init <- data.frame(dir = character(0),
+                     naam = character(0),
+                     obs = integer(0),
+                     vars = integer(0),
+                     geom_type = character(0),
+                     geom_fact = character(0),
+                     stringsAsFactors = FALSE)
+
+## ---- Bron: ODH Handmatig Reg. Risicokrt ---------------------------------- #
+bron <- "ODH | Handmatig | Reg. Risicokrt."
+df_tmp <- df_init
+lst_dirs <- list.dirs(paste0(dir_raw, "ODH"))
+
+nr <- 1
+for (k in seq_along(lst_dirs)) {
+  dir_ <- lst_dirs[k]
+  lst_files <- list.files(dir_, pattern = ".shp", full.names = TRUE)
+  for (i in seq_along(lst_files)) {
+    df_tmp[nr,] <- NA
+    df_tmp$dir[nr] <- dir_
+    curfeat <- lst_files[i]
+    df_tmp$naam[nr] <- str_remove(curfeat, paste0(dir_, "/"))
+    sf_tmp <- read_sf(curfeat) %>% 
+        st_transform(4326)
+    if (sum(st_is_valid(sf_tmp)) != nrow(sf_tmp)) {
+      sf_tmp <- st_make_valid(sf_tmp)
+      }
+    df_tmp$vars[nr] <- ncol(sf_tmp)
+    df_tmp$geom_fact[nr] <- st_geometry_type(sf_tmp, by_geometry = FALSE)
+    types <- levels(st_geometry_type(sf_tmp, by_geometry = FALSE))
+    df_tmp$geom_type[nr] <- types[as.numeric(df_tmp$geom_fact[nr])]
+    sf_tmp <- st_intersection(sf_tmp, sf_gem)
+    df_tmp$obs[nr] <- nrow(sf_tmp)
+    nr <- nr + 1
+  }
+}
+
+df_tbl_A0 <- df_tmp
+
+## ---- Bron: IPO WFS EV-signaleringskaart ---------------------------------- #
+bron <- "IPO | WFS | EV-signaleringskaart"
+df_tmp <- df_init
+lst_dirs <- list.dirs(paste0(dir_raw, "IPO_InterProvOverleg"))
+
+nr <- 1
+for (k in seq_along(lst_dirs)) {
+  dir_ <- lst_dirs[k]
+  lst_files <- list.files(dir_, pattern = ".shp", full.names = TRUE)
+  for (i in seq_along(lst_files)) {
+    df_tmp[nr,] <- NA
+    df_tmp$dir[nr] <- dir_
+    curfeat <- lst_files[i]
+    df_tmp$naam[nr] <- str_remove(curfeat, paste0(dir_, "/"))
+    sf_tmp <- read_sf(curfeat) %>% 
+        st_transform(4326)
+    if (sum(st_is_valid(sf_tmp)) != nrow(sf_tmp)) {
+      sf_tmp <- st_make_valid(sf_tmp)
+      }
+    df_tmp$vars[nr] <- ncol(sf_tmp)
+    df_tmp$geom_fact[nr] <- st_geometry_type(sf_tmp, by_geometry = FALSE)
+    types <- levels(st_geometry_type(sf_tmp, by_geometry = FALSE))
+    df_tmp$geom_type[nr] <- types[as.numeric(df_tmp$geom_fact[nr])]
+    sf_tmp <- st_intersection(sf_tmp, sf_gem)
+    df_tmp$obs[nr] <- nrow(sf_tmp)
+    nr <- nr + 1
+  }
+}
+
+df_tbl_A0 <- df_tbl_A0 %>% 
+  bind_rows(df_tmp)
+
+## ---- Bron: Prov. ZH WFS Open data portaal -------------------------------- #
+bron <- "PZH | WFS | Open data portaal"
+df_tmp <- df_init
+lst_dirs <- list.dirs(paste0(dir_raw, "PZH_ProvZuidHolland"))
+
+nr <- 1
+for (k in seq_along(lst_dirs)) {
+  dir_ <- lst_dirs[k]
+  lst_files <- list.files(dir_, pattern = ".shp", full.names = TRUE)
+  for (i in seq_along(lst_files)) {
+    df_tmp[nr,] <- NA
+    df_tmp$dir[nr] <- dir_
+    curfeat <- lst_files[i]
+    df_tmp$naam[nr] <- str_remove(curfeat, paste0(dir_, "/"))
+    sf_tmp <- read_sf(curfeat) %>% 
+        st_transform(4326)
+    if (sum(st_is_valid(sf_tmp)) != nrow(sf_tmp)) {
+      sf_tmp <- st_make_valid(sf_tmp)
+      }
+    df_tmp$vars[nr] <- ncol(sf_tmp)
+    df_tmp$geom_fact[nr] <- st_geometry_type(sf_tmp, by_geometry = FALSE)
+    types <- levels(st_geometry_type(sf_tmp, by_geometry = FALSE))
+    df_tmp$geom_type[nr] <- types[as.numeric(df_tmp$geom_fact[nr])]
+    sf_tmp <- st_intersection(sf_tmp, sf_gem)
+    df_tmp$obs[nr] <- nrow(sf_tmp)
+    nr <- nr + 1
+  }
+}
+
+df_tbl_A0 <- df_tbl_A0 %>% 
+  bind_rows(df_tmp)
+
+write_rds(df_tbl_A0, path = fpath_cln_lst)
+
+
+```
+

@@ -1,0 +1,31 @@
+{
+    "revdata":[
+        {
+            "item":"features",
+            "code":"NA",
+            "url_base":"https://rev-portaal.nl/geoserver/wfs",
+            "req_gcap":"?request=GetCapabilities&service=wfs&version=2.0.0",
+            "req_hits":"?request=GetFeature&service=wfs&typeName=&resultType=hits&version=2.0.0",
+            "req_feat":"?request=GetFeature&service=wfs&typeName=&outputFormat=SHAPE-ZIP",
+            "key":"NA"
+        },
+        {
+            "item":"fieldnames",
+            "code":"NA",
+            "url_base":"https://rev-portaal.nl/geoserver/wfs",
+            "req_gcap":"?request=DescribeFeatureType&service=wfs&typeName=&service=wfs",
+            "req_hits":"",
+            "req_feat":"",
+            "key":"NA"
+        },
+        {
+            "item":"capabilities",
+            "code":"NA",
+            "url_base":"https://rev-portaal.nl/geoserver/wfs",
+            "req_gcap":"?request=GetCapabilities",
+            "req_hits":"?request=GetFeature&service=wfs&typeName=&resultType=hits&version=2.0.0",
+            "req_feat":"?request=GetFeature&service=wfs&service=wfs&typeName=&outputFormat=SHAPE-ZIP",
+            "key":"NA"
+        }
+    ]
+}
