@@ -45,6 +45,10 @@ library(RCurl)
 library(XML)
 # library(ows4R)
 
+# -----------------------------------------------------------------------------
+## ------------------------ fresh slate ---------------------------------------
+rm(list=ls())
+
 ##--------------------------------------------------------------------------- #
 ## sourcing relevant functions ---------------------------------------------- #
 ##--------------------------------------------------------------------------- #
@@ -56,24 +60,22 @@ source("../functions/analyzeWFS.R")
 ohg <- Sys.getenv("Onderhanden-Gemeente")
 ohg_name <- str_split_1(ohg, pattern = " | ")[1]
 ohg_code <- str_split_1(ohg, pattern = " | ")[3]
+ohg_gmcd <- paste0("GM", ohg_code)
 ohg_path <- str_split_1(ohg, pattern = " | ")[5]
-pdl <- Sys.getenv("POS_DATALAKE")
+pos_dl <- Sys.getenv("POS_DATALAKE")
 
 ## Folders and paths -------------------------------------------------------- #
-dir_base <- paste0(pdl, ohg_name, "/")
+dir_base <- paste0(pos_dl, ohg_name, "/")
 dir_proj <- dirname(getwd())                      ## remove last folder in path
 dir_parm <- paste0(dir_proj, "/parameters/")
 
 dir_raw <- paste0(dir_base, "ruwe_data/")
-dir_raw_rev <- paste0(dir_raw, "REV_RegExtVeiligheid/")
-dir_raw_ag <- paste0(dir_raw_rev, "aandachtsgebieden")
-dir_raw_kg <- paste0(dir_raw_rev, "kwetsbare_objecten")
-dir_raw_gg <- paste0(dir_raw_rev, "hulplagen")
-dir_raw_geo <- paste0(dir_raw, "GeoBasis/")
-
 dir_cln <- paste0(dir_base, "schone_data/")
 
-fname_geo_gem <- "/gemeenten/gemeenten2019.shp"
+dir_raw_rev <- paste0(dir_raw, "REV_RegExtVeiligheid/")
+dir_raw_geo <- paste0(dir_raw, "PDOK_PublDVOpKaart/")
+
+fname_geo_gem <- "gemeente_gegeneraliseerd.geojson"
 fpath_geo_gem <- paste0(dir_raw_geo, fname_geo_gem)
 
 fname_parm <- "rev_ev.json"
@@ -81,22 +83,15 @@ fpath_parm <- paste0(dir_parm, fname_parm)
 
 fname_raw_cap <- "rev_cap.xml"
 fpath_raw_cap <- paste0(dir_raw_rev, fname_raw_cap)
-fname_raw_capqs <- "rev_cap.xml"
-fpath_raw_capqs <- paste0(dir_raw_rev, fname_raw_cap)
-fname_raw_capkg <- "rev_cap_kg.xml"
-fpath_raw_capkg <- paste0(dir_raw_rev, fname_raw_capkg)
-fname_raw_ag <- "rev_ag.zip"
-fpath_raw_ag <- paste0(dir_raw_ag, "/", fname_raw_ag)
-fname_raw_kg <- "rev_kg.zip"
-# fname_raw_kg <- "rev_kg.txt"
-fpath_raw_kg <- paste0(dir_raw_kg, "/", fname_raw_kg)
+
 fname_raw_feat <- "rev_feat.zip"
-fpath_raw_feat <- paste0(dir_raw_rev, "/", fname_raw_feat)
+fpath_raw_feat <- paste0(dir_raw_rev, fname_raw_feat)
+
 fname_raw_req <- "wfsrequest.txt"
-fpath_raw_req <- paste0(dir_raw_rev, "/", fname_raw_req)
+fpath_raw_req <- paste0(dir_raw_rev, fname_raw_req)
 
 fname_tbl_rev <- "feature_table_rev.rds"
-fpath_tbl_rev <- paste0(dir_raw_rev, "/", fname_tbl_rev)
+fpath_tbl_rev <- paste0(dir_raw_rev, fname_tbl_rev)
 
 ```
 
@@ -121,12 +116,17 @@ rev_codes <- read_lines(fpath_parm) %>%
   fromJSON()
 rev_codes <- rev_codes$revdata
 url_base <- rev_codes$url_base[rev_codes$item == "features"]
+
+url_cap <- paste0(url_base,
+                  rev_codes$req_gcap[rev_codes$item == "capabilities"])
 url_hits <- paste0(url_base,
                   rev_codes$req_hits[rev_codes$item == "features"])
-url_cap <- paste0(url_base,
-                  rev_codes$req_gcap[rev_codes$item == "features"])
+url_feat <- paste0(url_base,
+                  rev_codes$req_feat[rev_codes$item == "features"])
 url_names <- paste0(url_base,
-                  rev_codes$req_gcap[rev_codes$item == "fieldnames"])
+                  rev_codes$req_fnms[rev_codes$item == "fieldnames"])
+
+max_pg <- rev_codes$max_pg[rev_codes$item == "capabilities"]
 
 ## Load secrets for data source --------------------------------------------- #
 #opts = curlOptions(userpwd = paste0(Sys.getenv("rev_user"),
@@ -142,13 +142,12 @@ url_names <- paste0(url_base,
 ##  We ronden af , zodat het filteren sneller kan verlopen (lijkt het) ------ #
 ## -------------------------------------------------------------------------- #
 sf_gem <- read_sf(fpath_geo_gem) %>% 
-  filter(gemeentena == "Weert")
-x <- st_bbox(sf_gem)
-x[["xmin"]] <- round(x[["xmin"]], 0)
-x[["ymin"]] <- round(x[["ymin"]], 0)
-x[["xmax"]] <- round(x[["xmax"]]+1, 0)
-x[["ymax"]] <- round(x[["ymax"]]+1, 0)
-bb_wrt <- paste(as.integer(x), collapse = ",")
+  filter(statcode ==ohg_gmcd)
+bb_gem <- st_bbox(sf_gem)
+bb_gem[["xmin"]] <- round(bb_gem[["xmin"]], 0)
+bb_gem[["ymin"]] <- round(bb_gem[["ymin"]], 0)
+bb_gem[["xmax"]] <- round(bb_gem[["xmax"]]+1, 0)
+bb_gem[["ymax"]] <- round(bb_gem[["ymax"]]+1, 0)
 
 ## -------------------------------------------------------------------------- #
 ## -- DEEL 1: KLAARZETTEN URL REQUEST VARIANTEN REV -------------------------
@@ -160,11 +159,10 @@ req_form <- "&outputFormat=SHAPE-ZIP"
 req_vers <- "&version=2.0.0"
 req_cnt <- "&count=30000"
 req_start <- "&startindex=1"
-gem_naam <- "'Weert'"
-gem_code <- "'GM0988'"
-req_filt <- paste0("&cql_filter=bronhoudercode=", gem_code)
-# req_filt <- paste0("&cql_filter=bronhoudercode=", gem_naam)
-req_bbox <- paste0("&BBOX=", bb_wrt)
+req_count <- paste0("&count=", max_pg)
+req_filt <- paste0("&cql_filter=bronhoudercode=", ohg_gmcd)
+req_bbox <- paste0("&BBOX=", paste(as.integer(bb_gem), collapse = ","))
+
 ## -------------------------------------------------------------------------- #
 ## -- DEEL 1: INLADEN GENERAL FEATURES -------------------------------------- #
 ## -------------------------------------------------------------------------- #
@@ -223,9 +221,9 @@ for (i in seq_along(index)) {
 
 #  vullen veldnamen in feature + detecteren of bronhoudercode in de veldnamen
 #  voorkomen && of het om een gemeentelijke code gaat (alleen bij KGL)
-  url_feat <- str_replace(url_names, "typeName=",
+  url2get <- str_replace(url_names, "typeName=",
                         paste0("typeName=", df_ftl$name[i]))
-  xml_names <- getURL(url_feat)
+  xml_names <- getURL(url2get)
   xml_data <- xmlParse(xml_names)
   lst_names <- xmlToList(xml_data)
   lst_names <- lst_names[["complexType"]][["complexContent"]][["extension"]][["sequence"]]
@@ -265,57 +263,51 @@ write_rds(df_ftl, fpath_tbl_rev)
 ## -------------------------------------------------------------------------- #
 ## Data inladen (alle features ophalen vanuit rev) -------------------------- #
 ## Bij KGL_module en KGL_public krijgen we: "Dienst is tijdelijk niet ------- #
-##        bereikbaar, probeert u het later nog eens"
+##        bereikbaar, probeert u het later nog eens" ------------------------ #
+## Bij REV is het gebruik van result pages lastig, waarschijnlijk ondersteunen#
+## ze dit uberhaupt niet ...  ----------------------------------------------- #
 ## -------------------------------------------------------------------------- #
-url_base <- rev_codes$url_base[rev_codes$item == "features"]
-url_init <- paste0(url_base,
-                   rev_codes$req_feat[rev_codes$item == "features"])
-max_pg <- 30000
-req_count <- paste0("&count=", max_pg)
-
-i <-20
+i <- 20
 for (i in seq_along(df_ftl$name)) {
   nm_feat <- df_ftl$name[i]
   nr_feat <- df_ftl$nr_in_GEM[i]
   gem_key <- df_ftl$gem_key[i]
-  url_feat <- str_replace(url_init, "typeName=",
+  url_start <- str_replace(url_feat, "typeName=",
                         paste0("typeName=", nm_feat))
   nm_file <- paste0(str_split(nm_feat, ":")[[1]][2], ".shp")
   nm_path <- paste0(dir_raw_rev, "/", nm_file)
-  url_feat_GEM <- if(gem_key) paste0(url_feat, req_filt) else paste0(url_feat, req_bbox)
-  writeBin(getBinaryURL(url_feat_GEM), fpath_raw_feat)
+  url2get <- if(gem_key) paste0(url_start, req_filt) else paste0(url_start, req_bbox)
+  if (nr_feat < max_pg) {        ## check of meerdere result pages nodig zijn #
+  writeBin(getBinaryURL(url2get), fpath_raw_feat)
   unzip(fpath_raw_feat, exdir = dir_raw_rev)
+  } else {
+    nr_pgs <- ceiling(nr_feat/max_pg)
+    vct_pgs <- seq(from = 1, to = nr_feat, by = max_pg)
+    for (j in seq_along(vct_pgs)) {      ## loop langs benodigde result pages #
+      req_start <- paste0("&startindex=", vct_pgs[j])
+      url2get <- paste0(url2get, req_start, req_count)
+      writeBin(getBinaryURL(url2get), fpath_raw_feat)
+      unzip(fpath_raw_feat, exdir = dir_raw_rev)
+      if (j == 1) {                                        ## 1st result page #
+        sf_base <- read_sf(nm_path)
+        print(paste0(nm_feat, ": ", nrow(sf_base)))
+      } else {                                ## 2nd and further result pages #
+        sf_add <- read_sf(nm_path)
+        sf_base <- bind_rows(sf_base, sf_add)
+        print(paste0(nm_feat, ": ", nrow(sf_add)))
+      }
+    }
+    file.remove(nm_path)                       ## delete temporary shape file #
+    write_sf(sf_base, nm_path, append = FALSE)
+  }
   print(paste0(nm_feat, ": ", nr_feat))
 }
-file.remove(fpath_raw_feat)
-file.remove(fpath_raw_req)
+file.remove(fpath_raw_feat)                            ## delete the zip-file #
 
 write_rds(df_ftl, paste0(dir_raw_rev, "rev_features.rds"))
 
 sf_public <- read_sf(paste0(dir_raw_rev, "kgl_publicPolygon.shp")) 
 sf_module <- read_sf(paste0(dir_raw_rev, "kgl_modulePolygon.shp")) 
-
-## -------------------------------------------------------------------------- #
-## Auxiliary code not used
-## -------------------------------------------------------------------------- #
-## get attribute names from feature
-# gem_code <- "'GM0988'"
-# req_filt <- paste0("&cql_filter=bronhoudercode=", gem_code)
-# i <-20
-# nm_feat <- df_ftl$name[i]
-# nr_feat <- df_ftl$nr_in_GEM[i]
-# url_feat <- str_replace(url_init, "typeName=",
-#                         paste0("typeName=", nm_feat))
-# url_feat <- str_replace(url_feat, "request=GetFeature",
-#                         "request=DescribeFeatureType")
-# url_feat <- str_replace(url_feat, "&outputFormat=SHAPE-ZIP","")   # nu xml-file
-# nm_file <- paste0(str_split(nm_feat, ":")[[1]][2], "_attr.xml")
-# nm_path <- paste0(dir_raw_rev, "/", nm_file)
-# error_download <- download.file(url_feat, destfile = nm_path)
-# stopifnot(error_download == 0) 
-# 
-# names(sf_module)
-
 
 ```
 

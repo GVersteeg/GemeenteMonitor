@@ -5,6 +5,7 @@
             "code":"NA",
             "url_base":"https://rev-portaal.nl/geoserver/wfs",
             "req_gcap":"?request=GetCapabilities",
+            "max_pg":300000,
             "key":"NA"
         },
         {

@@ -1,0 +1,28 @@
+{
+    "alodata":[
+        {
+            "item":"capabilities",
+            "code":"NA",
+            "url_base":"https://data.rivm.nl/geo/alo/wfs",
+            "req_gcap":"?request=GetCapabilities&service=wfs&version=2.0.0",
+            "max_pg":25000,
+            "key":"NA"
+        },
+        {
+            "item":"fieldnames",
+            "code":"NA",
+            "url_base":"https://apps.geodan.nl/public/data/org/gws/IENW7924REVX/rev_public/wfs",
+            "req_fnms":"?request=DescribeFeatureType&typeName=&service=wfs&version=2.0.0",
+            "key":"NA"
+        },
+        {
+            "item":"features",
+            "code":"NA",
+            "url_base":"https://apps.geodan.nl/public/data/org/gws/IENW7924REVX/rev_public/wfs",
+            "req_hits":"?request=GetFeature&service=wfs&typeName=&resultType=hits&version=2.0.0",
+            "req_feat":"?request=GetFeature&service=wfs&typeName=&outputFormat=application/json&version=2.0.0",
+            "req_ag":"?request=GetFeature&service=WFS&typeName=qs_ev_activiteiten,qs_aandachtsgebieden,qs_prcontouren_en_veiligheidsafstanden,qs_vervoer_en_buisleidingen&outputFormat=SHAPE-ZIP",
+            "key":"NA"
+        }
+    ]
+}

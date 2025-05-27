@@ -1,0 +1,29 @@
+
+{
+    "csvnames":[
+        {
+            "jaar":"2014",
+            "code":"Energie_postcode6_2014.csv"
+        },
+        {
+            "jaar":"2015",
+            "code":"Energie_postcode6_2015.csv"
+        },
+        {
+            "jaar":"2016",
+            "code":"Energie_postcode6_2016.csv"
+        },
+        {
+            "jaar":"2017",
+            "code":"Energie_postcode6_2017.csv"
+        },
+        {
+            "jaar":"2018",
+            "code":"Energie_postcode6_2018.csv"
+        },
+        {
+            "jaar":"2019",
+            "code":"Energie_postcode6_2019.csv"
+        }
+    ]
+}

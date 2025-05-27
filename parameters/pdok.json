@@ -1,0 +1,31 @@
+{
+    "pdokdata":[
+        {
+            "item":"capabilities",
+            "code":"NA",
+            "url_base":"https://service.pdok.nl/cbs/gebiedsindelingen/xxxx/wfs/v1_0",
+            "req_gcap":"?request=GetCapabilities",
+            "max_pg":1000,
+            "key":"NA"
+        },
+        {
+            "item":"fieldnames",
+            "code":"NA",
+            "url_base":"https://service.pdok.nl/cbs/gebiedsindelingen/xxxx/wfs/v1_0",
+            "req_fnms":"?request=DescribeFeatureType&typeName=&service=wfs&version=2.0.0",
+            "key":"NA"
+        },
+        {
+            "item":"features",
+            "code":"NA",
+            "url_base":"https://service.pdok.nl/cbs/gebiedsindelingen/xxxx/wfs/v1_0",
+            "req_hits":"?request=GetFeature&service=wfs&typeName=&resultType=hits&version=2.0.0",
+            "req_feat":"?request=GetFeature&service=wfs&typeName=&outputFormat=application/json&version=2.0.0",
+            "req_brt":"?request=GetFeature&service=wfs&typeName=buurt_gegeneraliseerd&outputFormat=application/json&version=2.0.0",
+            "req_wijk":"?request=GetFeature&service=wfs&typeName=wijk_gegeneraliseerd&outputFormat=application/json&version=2.0.0",
+            "req_gem":"?request=GetFeature&service=wfs&typeName=gemeente_gegeneraliseerd&outputFormat=application/json&version=2.0.0",
+            "req_reg":"?request=GetFeature&service=wfs&typeName=regionale_energiestrategie_gegeneraliseerd&outputFormat=application/json&version=2.0.0",
+            "key":"NA"
+        }
+    ]
+}

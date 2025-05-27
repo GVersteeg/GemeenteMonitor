@@ -1,0 +1,232 @@
+---
+title: "Inlezen CBS Demografie"
+author: "Gerrit"
+date: "06/04/2025"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## -------------------------------------------------------------------------- #
+## ----------- housekeeping ------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## loading libraries -------------------------------------------------------- #
+library(tidyverse)
+library(cbsodataR)
+library(jsonlite)
+
+# -----------------------------------------------------------------------------
+## ------------------------ fresh slate ---------------------------------------
+rm(list=ls())
+
+##--------------------------------------------------------------------------- #
+## Get environment variables ------------------------------------------------ #
+##--------------------------------------------------------------------------- #
+ohg <- Sys.getenv("Onderhanden-Gemeente")
+ohg_name <- str_split(ohg, pattern = " | ")[[1]][1]
+ohg_code <- str_split(ohg, pattern = " | ")[[1]][3]
+ohg_gmcd <- paste0("GM", ohg_code)
+ohg_path <- str_split(ohg, pattern = " | ")[[1]][5]
+pdl <- Sys.getenv("POS_DATALAKE")
+
+## Folders and paths -------------------------------------------------------- #
+dir_base <- paste0(pdl, ohg_name, "/")
+dir_proj <- dirname(getwd())                      ## remove last folder in path
+dir_parm <- paste0(dir_proj, "/parameters/")
+
+dir_raw <- paste0(dir_base, "ruwe_data/")
+dir_cln <- paste0(dir_base, "schone_data/")
+dir_lut <- paste0(dir_base, "luts/")
+
+dir_raw_geo <- paste0(dir_raw, "PDOK_PublDVOpKaart/")
+dir_raw_cbs <- paste0(dir_raw, "CBS_CentrBureauStat/")
+dir.create(dir_raw_cbs, showWarnings = FALSE)
+dir_raw_cbs_dem <- paste0(dir_raw_cbs, "demografie/")
+dir.create(dir_raw_cbs_dem, showWarnings = FALSE)
+
+dir_cln_geo <- paste0(dir_cln, "geo/")
+dir_cln_mon <- paste0(dir_cln, "monitor/")
+
+fname_parm <- "cbs_dem.json"
+fpath_parm <- paste0(dir_parm, fname_parm)
+
+fname_cbs_demo <- "cbs_dem_YYYY.csv"               ## depends on year extracted
+fpath_cbs_demo <- paste0(dir_raw_geo, fname_cbs_demo)
+fname_lut_demo <- "cbs_lut_brt_dem.rds"
+fpath_lut_demo <- paste0(dir_raw_cbs_dem, fname_lut_demo)
+
+```
+
+## Introductie
+Dit script rapporteert het inlezen van gegevens rond de demografische kerncijfers voor allerlei buurten en wijken vanuit het Open Data Portal van het CBS.
+
+Voorbeeld:
+
+* Identifier	84799NED
+* Korte titel	Kerncijfers buurten en wijken 2020
+* Samenvatting	Demografische kerncijfers per buurt/wijk
+* Verslagperiode	2020
+
+## Bestandsgegevens ruwe CBS data
+
+* Bron: CBS Open Data Portal
+* Freq: Jaarlijks
+* Perioden: 2004 tot 2020
+* Datalake: ruwe_data/geo
+
+In deze jaarlijkse bestanden komen allerlei kolommen met demografische gegevens voor, variërend tussen 107 en 182). We selecteren hieruit een aantal kolommen die in alle bestanden voorkomen.
+
+| Kolnaam                   | Type | Opmerkingen                              |
+|:--------------------------|:-----|:-----------------------------------------|
+| WijkenEnBuurten           | chr  | De sleutel van het bestand vanaf 2014    |
+| RegioS                    | chr  | De sleutel voor de jaren 2004-2013       |
+| Perioden                  | chr  | Aanwezig als bestand meerdere jaren kent |
+| Codering                  | chr  | De standaard codering voor wijk/buurt/gm |
+| Gemeentenaam              | chr  |                                          |
+| AantalInwoners            | chr  |                                          |
+| HuishoudensTotaal         | chr  |                                          |
+| Eenpersoonshuishoudens    | chr  |                                          |
+| HuishoudensZonderKinderen | chr  |                                          |
+| HuishoudensMetKinderen    | chr  |                                          |
+| Woningvoorraad            | chr  |                                          |
+| Koopwoningen              | chr  |                                          |
+| HuurwoningenTotaal        | chr  |                                          |
+| BouwjaarVoor2000          | chr  | t/m 2012 heet de kolom Bouwjaarklasse    |
+| BouwjaarVanaf2000         | chr  | t/m 2012 heet de kolom Bouwjaarklasse    |
+
+## Importeren
+
+### Inlezen ruwe data
+
+
+De bron is het CBS, waarbij jaarlijkse bestanden beschikbaar zijn met een bepaalde 'cbs-code'. Die jaarlijkse codes zijn vastgelegd in een JSON-bestand (cbs_dem.json) in de parameters folder.
+
+
+#### Bestandsgegevens schone energieverbruiksdata CBS
+
+* Datalake: `ruwe_data/geo`
+* Naam: `cbs_dem_2010_2020.rds`
+* Freq: Jaarlijks
+* Perioden: 2010 tot 2019
+
+
+```{r read, echo=FALSE, warning=FALSE}
+## -------------------------------------------------------------------------- #
+## ----------- data retrieval ----------------------------------------------- #
+## 1. Data inladen rond demografische gegevens (per buurt, wijk, gemeente)    #
+##    vanuit CBS                                                              #
+## -------------------------------------------------------------------------- #
+## Ophalen cbs-codes voor kerncijfers wijken en buurten --------------------- #
+## -------------------------------------------------------------------------- #
+cbs_codes <- read_lines(fpath_parm) %>% 
+  fromJSON()
+cbs_codes <- cbs_codes$cbsodata
+
+## -------------------------------------------------------------------------- #
+## Data inladen (gemiddeld EV voor part. woningen vanuit CBS ---------------- #
+## Note on dplyr::bind_rows
+##    When row-binding, columns are matched by name, 
+##    and any missing columns will be filled with NA
+## Results in dataframe df_demo
+# ohg_code <- paste0('"', "0988", '"')
+# args <- list(id = cbs_code, cbs_key = paste0("has_substring(\"", ohg_code, "\")"))
+# args <- list(id = cbs_code, cbs_key = 'has_substring(0988)')
+# names(args)[2] <- cbs_key
+# # args$RegioS[1] <- gsub("gc", ohg_code, args$RegioS[1])
+# do.call(cbs_get_data, args)
+## -------------------------------------------------------------------------- #
+sel_cols <- c("jaar", "regio", "inws", "hhds", "ephhds", "hhdszk",
+              "hhdsmk", "wvrd", "kwn", "hwn")
+cbs_cds <- cbs_codes[-c(1:9),]    ## find solution for dynamic arguments later
+i <- 2
+for (i in seq_along(cbs_cds$jaar)) {
+  cbs_code <- cbs_cds$code[i]
+  cbs_year <- cbs_cds$jaar[i]
+  cbs_key <- cbs_cds$key[i]
+  more_yr <- str_detect(cbs_year, "-")      ## switch if multiple years in file
+
+  if (cbs_key == "RegioS") {
+    df_tmp <- cbs_get_data(id = cbs_code, 
+                         RegioS = has_substring(ohg_code))
+    }
+  if (cbs_key == "WijkenEnBuurten") {
+    df_tmp <- cbs_get_data(id = cbs_code, 
+                         WijkenEnBuurten = has_substring(ohg_code))
+    }
+  df_tmp <- df_tmp %>% 
+    filter(str_detect(Gemeentenaam_1, ohg_name)) %>% 
+    mutate(across(everything(), as.character)) %>%
+    mutate(across(where(is.character), str_trim))
+  
+  if (more_yr) {
+    df_tmp <- df_tmp %>% 
+      mutate(jaar = str_replace(Perioden, "JJ00", "")) %>%    ## add jaar-kolom
+      mutate(Perioden = cbs_year)                      ## adjust perioden-kolom
+  } else {
+    df_tmp <- df_tmp %>% 
+      mutate(jaar = cbs_year)                                 ## add jaar-kolom
+  }
+
+  fpath_cbs_demo <- paste0(dir_raw_cbs_dem, "cbs_dem_", cbs_year, ".csv")
+  write.csv2(df_tmp, fpath_cbs_demo, row.names = FALSE)
+
+  print(paste0("[", i, "] : rows ", nrow(df_tmp), " - cols : ", ncol(df_tmp)))
+  names(df_tmp) <- str_replace(names(df_tmp), "^k_", "k")
+  names(df_tmp) <- str_replace(names(df_tmp), 
+                               "jaarklasseTot2000", "jaarVoor2000")
+  names(df_tmp) <- str_replace(names(df_tmp), 
+                               "jaarklasseVanaf2000", "jaarVanaf2000")
+  names(df_tmp) <- str_split(names(df_tmp), "_", simplify = TRUE)[,1]
+  df_tmp <- df_tmp %>% 
+    setNames(make.names(names(.), unique = TRUE)) %>% 
+    rename(regio = Codering,
+           inws = AantalInwoners,
+           hhds = HuishoudensTotaal,
+           ephhds = Eenpersoonshuishoudens,
+           hhdszk = HuishoudensZonderKinderen,
+           hhdsmk = HuishoudensMetKinderen,
+           wvrd = Woningvoorraad,
+           kwn = Koopwoningen,
+           hwn = HuurwoningenTotaal
+           ) %>% 
+    select(all_of(sel_cols))
+
+  if (i == 1) {
+    df_demo <- df_tmp
+  } else {
+    df_demo <- bind_rows(df_demo, df_tmp)
+  }
+  df_demo <- df_demo %>% 
+    arrange(jaar, regio)
+}
+
+nr_demo <- nrow(df_demo)
+nc_demo <- ncol(df_demo)
+
+## -------------------------------------------------------------------------- #
+## save the resulting lookup demografie table in R-format
+## -------------------------------------------------------------------------- #
+write_rds(df_demo, file = fpath_lut_demo)
+
+```
+
+| File                       | observaties | variabelen  |
+|:---------------------------|:-----------:|:-----------:|
+| df_ev (`r fpath_lut_demo`) | `r nr_demo` | `r nc_demo` |
+
+
+Kolommen in schone lookup table voor demografische gegevens:
+
+| Kolnaam                   | Type | Opmerkingen                              |
+|:--------------------------|:-----|:-----------------------------------------|
+| jaar                      | chr  | periode                                  |
+| regio                     | chr  | De standaard CBS10-code voor wijk, buurt |
+| inws                      | chr  | Aantal inwoners                          |
+| hhdns                     | chr  | Totaal aantal huishoudens                |
+| ephhdns                   | chr  | Aantal eenpersoonshuishoudens            |
+| hhdnszk                   | chr  | Aantal huishoudens zonder kinderen       |
+| hhdnsmk                   | chr  | Aantal huishoudens met kinderen          |
+| wvrd                      | chr  | Woningvoorraad                           |
+| kwn                       | chr  | Aantal koopwoningen                      |
+| hwn                       | chr  | Aantal huurwoningen                      |

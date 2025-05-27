@@ -1,0 +1,255 @@
+---
+title: "Inlezen geografische gebieden Nederland"
+author: "Gerrit Versteeg"
+date: "08/04/2025"
+output: pdf_document
+---
+
+## Introductie
+Dit script leest de WFS van PDOK in, voor wat betreft gebiedsindelingen zoals deze bekend zijn en gebruikt worden door het CBS. Hierbinnen vallen contouren van gemeenten, wijken, buurten.
+De bron is de geoserver van het PDOK, waarin bestanden beschikbaar zijn o.b.v. een specfieke URL. Die URL's zijn vastgelegd in een JSON-bestand (pdok.json) in de parameters folder.
+
+https://service.pdok.nl/cbs/gebiedsindelingen/2025/wfs/v1_0?request=GetCapabilities&service=WFS
+
+## Ruwe WFS-layers aandachtsgebieden  
+* Bron: https://service.pdok.nl  
+* URL:  https://service.pdok.nl/cbs/gebiedsindelingen/2025/wfs/v1_0  
+* Format: ZIP-file  
+* Gebied: Nederland  
+* Datalake: ruwe_data/PDOK_PublDVOpKaart/  
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## -------------------------------------------------------------------------- #
+## ----------- housekeeping ------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## loading libraries -------------------------------------------------------- #
+library(jsonlite)
+library(tidyverse)
+library(sf)
+library(RCurl)
+library(XML)
+library(xml2)
+# library(ows4R)
+
+## -------------------------------------------------------------------------- #
+## clear global environment ------------------------------------------------- #
+rm(list = ls())                   ## remove all objects from global environment
+
+##--------------------------------------------------------------------------- #
+## sourcing relevant functions ---------------------------------------------- #
+##--------------------------------------------------------------------------- #
+source("../functions/analyzeWFS.R")
+
+##--------------------------------------------------------------------------- #
+## Get environment variables ------------------------------------------------ #
+##--------------------------------------------------------------------------- #
+ohg <- Sys.getenv("Onderhanden-Gemeente")
+ohg_name <- str_split(ohg, pattern = " | ")[[1]][1]
+ohg_code <- str_split(ohg, pattern = " | ")[[1]][3]
+ohg_gmcd <- paste0("GM", ohg_code)
+ohg_path <- str_split(ohg, pattern = " | ")[[1]][5]
+pos_dl <- Sys.getenv("POS_DATALAKE")
+
+## Folders and paths -------------------------------------------------------- #
+dir_base <- paste0(pos_dl, ohg_name, "/")
+dir_proj <- dirname(getwd())                      ## remove last folder in path
+dir_parm <- paste0(dir_proj, "/parameters/")
+
+dir_raw <- paste0(dir_base, "ruwe_data/")
+dir_raw_pdok <- paste0(dir_raw, "PDOK_PublDVOpKaart/")
+dir.create(dir_raw_pdok, showWarnings = FALSE)
+
+fname_parm <- "pdok.json"
+fpath_parm <- paste0(dir_parm, fname_parm)
+
+fname_raw_cap <- "feature_raw_pdok.xml"
+fname_tbl_pdok <- "feature_table_pdok.rds"
+fname_geo_gem <- "gemeenten.geojson"
+fname_geo_wijk <- "wijken.geojson"
+fname_geo_brt <- "buurten.geojson"
+
+fpath_raw_cap <- paste0(dir_raw_pdok, fname_raw_cap)
+fpath_tbl_pdok <- paste0(dir_raw_pdok, fname_tbl_pdok)
+fpath_geo_gem <- paste0(dir_raw_pdok, fname_geo_gem)
+fpath_geo_wijk <- paste0(dir_raw_pdok, fname_geo_wijk)
+fpath_geo_brt <- paste0(dir_raw_pdok, fname_geo_brt)
+
+```
+
+
+## Importeren
+
+### Inlezen ruwe data
+
+De bron is de geoserver van het PDOK, waarin bestanden beschikbaar zijn o.b.v. 
+een specfieke URL. Die URL's zijn vastgelegd in een JSON-bestand (pdok.json) 
+in de parameters folder.
+
+
+```{r read, echo=FALSE, warning=FALSE}
+## -------------------------------------------------------------------------- #
+## ----------- inlezen DATA vanuit PDOK Gebiedsindelingen   ----------------- #
+## -------------------------------------------------------------------------- #
+## ----------- data retrieval ----------------------------------------------- #
+##  -- 1. URL's inladen vanuit parameter-file rev_ev.json  ------------------
+## -------------------------------------------------------------------------- #
+pdok_codes <- read_lines(fpath_parm) %>% 
+  fromJSON()
+pdok_codes <- pdok_codes$pdokdata
+
+## most recent year in PDOK only available after july. before?: use last year
+cur_year <- as.numeric(format(Sys.Date(), "%Y"))
+cur_month <- as.numeric(format(Sys.Date(), "%m"))
+pdok_year <- as.character(cur_year)
+pdok_year <- if (cur_month > 8) as.character(cur_year) else
+  as.character(cur_year - 1)
+url_base <- pdok_codes$url_base[pdok_codes$item == "features"]
+url_base <- str_replace(url_base, "xxxx", pdok_year) 
+url_cap <- paste0(url_base,
+                  pdok_codes$req_gcap[pdok_codes$item == "capabilities"])
+url_hits <- paste0(url_base,
+                  pdok_codes$req_hits[pdok_codes$item == "features"])
+url_feat <- paste0(url_base,
+                  pdok_codes$req_feat[pdok_codes$item == "features"])
+url_gem <- paste0(url_base,
+                  pdok_codes$req_gem[pdok_codes$item == "features"])
+url_wijk <- paste0(url_base,
+                  pdok_codes$req_wijk[pdok_codes$item == "features"])
+url_brt <- paste0(url_base,
+                  pdok_codes$req_buurt[pdok_codes$item == "features"])
+url_names <- paste0(url_base,
+                  pdok_codes$req_fnms[pdok_codes$item == "fieldnames"])
+
+## max aantal features per page request
+max_pg <- pdok_codes$max_pg[pdok_codes$item == "capabilities"]
+req_count <- paste0("&count=", max_pg)
+
+## -------------------------------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## -- DEEL 1: INLADEN GENERAL FEATURES -------------------------------------- #
+## -------------------------------------------------------------------------- #
+## Data inladen Capabilities voor hele pdok-Portaal ------------------------- #
+# Vormen van WFS benadering:
+# 1. error_download <- download.file(url_cap, destfile = fpath_raw_cap)
+#    stopifnot(error_download == 0) 
+#
+# 2. xml_cap <- getURL(url_cap)
+#    data <- xmlParse(xml_cap)
+#    lst_getcap <- xmlToList(data)
+#
+# 3. writeBin(getBinaryURL(url_feat_GEM), fpath_raw_feat)
+#    unzip(fpath_raw_feat, exdir = dir_raw_pdok)
+#
+# NB. xmlParse geeft een 'internal document'. It is pointer to a C object. 
+#.    xmlTreeParse levert een R object, waar je inhoud dan nog
+## -------------------------------------------------------------------------- #
+xml_cap <- getURL(url_cap)      ## de XML komt met een goede featureTypeList !! 
+data <- read_xml(xml_cap)         ## parse xml-doc into a XML-object using xml2
+data <- xml_ns_strip(data)
+lst_fts <- xml_find_all(data, "//FeatureType")
+ix_fts <- xml_text(xml_find_all(data, "//FeatureType"))
+ix_tts <- xml_text(xml_find_all(data, "//Title"))
+
+## start de bouw v.h. dataframe voor beschikbare FeatureTypes
+df_fts <- tibble(
+  name = xml_text(xml_find_all(lst_fts, ".//Name")),
+  title = xml_text(xml_find_all(lst_fts, ".//Title")),
+  abstract = xml_text(xml_find_all(lst_fts, ".//Abstract")),
+  defaultCRS = xml_text(xml_find_all(lst_fts, ".//DefaultCRS")),
+  formats = xml_text(xml_find_all(lst_fts, ".//OutputFormats")),
+  meta = xml_text(xml_find_all(lst_fts, ".//MetadataURL"))
+  )
+df_fts <- df_fts %>% 
+  mutate(attributes = NA_character_,
+         nr_in_NL = NA_integer_)
+
+## -------------------------------------------------------------------------- # 
+## --- xml_in -- OPZETTEN DATAFAME MET BESCHIKBARE FEATURETYPES ------------- #
+## -------------------------------------------------------------------------- # 
+## Bij XML altijd bestand eerst als binary file in geheugen lezen en dan 
+## deze file uit geheugen gaan parsen als XML (xmlParse / read_xml)
+## 1 - inlezen bestand als binary file in geheugen
+## 2 - inlezen XML-bestand voor gebruik met package XML
+## 3 - selecteren van de FeatureTypeList
+## -------------------------------------------------------------------------- # 
+
+## loop voor het vullen van het dataframe voor beschikbare FeatureTypes
+i <- 1
+for (i in seq_along(df_fts$title)) {
+#  vullen standaard feature specs
+  cur_title <- df_fts$title[i]
+  cur_name <- df_fts$name[i]
+  url2get <- str_replace(url_names, "typeName=",
+                        paste0("typeName=", cur_name))
+  xml_names <- getURL(url2get)
+  xml_data <- xmlParse(xml_names)
+  lst_names <- xmlToList(xml_data)
+  lst_names <- lst_names[["complexType"]][["complexContent"]][["extension"]][["sequence"]]
+  vec_names = c()
+  for (j in seq_along(lst_names)) {
+    velden <- lst_names[[j]]
+    veld <- velden[names(velden) == "name"]
+    vec_names <- c(vec_names, veld)
+  }
+  vec_names <- unname(vec_names)
+  df_fts$attributes[i] <- list(vec_names)
+
+#  vullen aantal voorkomens feature in Nederland
+  url_hits_NL <- str_replace(url_hits, "typeName=",
+                        paste0("typeName=", cur_title))
+  xml_hits_NL <- getURL(url_hits_NL)
+  xml_hits_NL <- xml_ns_strip(read_xml(xml_hits_NL))
+  hits_NL <- xml_attr(xml_hits_NL, "numberMatched")
+  df_fts$nr_in_NL[i] <- as.numeric(hits_NL)
+}
+
+print(df_fts)
+write_rds(df_fts, fpath_tbl_pdok)
+
+## -------------------------------------------------------------------------- #
+## -- DEEL 2: INLADEN ALLE FEATURES VAN REV --------------------------------- #
+## -------------------------------------------------------------------------- #
+## Data inladen (alle features ophalen vanuit pdok) ------------------------- #
+## -------------------------------------------------------------------------- #
+for (i in seq_along(df_fts$title)) {
+  nm_feat <- df_fts$title[i]
+  nr_feat <- df_fts$nr_in_NL[i]
+  url_start <- str_replace(url_feat, "typeName=",
+                        paste0("typeName=", nm_feat))
+  nm_file <- paste0(nm_feat, ".geojson")
+  nm_path <- paste0(dir_raw_pdok, nm_file)
+  if (nr_feat < max_pg) {        ## check of meerdere result pages nodig zijn #
+    error_download <- download.file(url_start, destfile = nm_path)
+    stopifnot(error_download == 0) 
+  } else {
+    nr_pgs <- ceiling(nr_feat/max_pg)
+    vct_pgs <- seq(from = 1, to = nr_feat, by = max_pg)
+    for (j in seq_along(vct_pgs)) {      ## loop langs benodigde result pages #
+      req_start <- paste0("&startindex=", vct_pgs[j])
+      url2get <- paste0(url_start, req_start, req_count)
+      error_download <- download.file(url2get, destfile = nm_path)
+      stopifnot(error_download == 0) 
+      if (j == 1) {                                        ## 1st result page #
+        sf_base <- read_sf(nm_path)
+        print(paste0(nm_feat, ": ", nrow(sf_base)))
+      } else {                                ## 2nd and further result pages #
+        sf_add <- read_sf(nm_path)
+        sf_base <- bind_rows(sf_base, sf_add)
+        print(paste0(nm_feat, ": ", nrow(sf_add)))
+      }
+    }
+    file.remove(nm_path)                             ## delete temporary file #
+    write_sf(sf_base, nm_path, append = FALSE)
+  }
+  print(paste0(nm_feat, ": ", nr_feat))
+}
+
+sf_buurt <- read_sf(paste0(dir_raw_pdok, "buurt_gegeneraliseerd.geojson")) 
+sf_wijk <- read_sf(paste0(dir_raw_pdok, "wijk_gegeneraliseerd.geojson")) 
+sf_gem <- read_sf(paste0(dir_raw_pdok, "gemeente_gegeneraliseerd.geojson")) 
+
+```
+

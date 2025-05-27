@@ -1,0 +1,273 @@
+---
+title: "Schonen BBDH, CBS Demografie"
+author: "Gerrit Versteeg"
+date: "08/11/2022"
+output: pdf_document
+---
+
+## Introductie
+Dit script schoont de diverse jaar-bestanden van het CBS (ingelezen door: cbs2raw_demografie.Rmd) en combineert deze in één RDS met alle jaren en op één generieke set van kolommen en rapporteert het verwerken van de gegevens. Het gaat hier over de demografische kerncijfers voor allerlei buurten en wijken ontsloten vanuit het Open Data Portal van het CBS.
+
+In deze jaarlijkse bestanden komen allerlei kolommen met demografische gegevens voor, per jaar variërend tussen 107 en 182). We selecteren hieruit een aantal kolommen die in alle bestanden voorkomen. Dit doen we met behulp van een parameter-Excel (in de parameters folder), waarin voor elk jaar staat aangegeven welke kolommen van de jaar-data horen bij welke kolommen van de generieke dataset. Als een nieuw jaar beschikbaar is, kan na controle van de meta-data van het nieuwe jaar-bestand, de Excel worden ge-update met dit nieuwe jaar, waarna dit script ongewijzigd kan worden gestart.
+
+### Updaten van de Excel met een nieuw jaar betekent:
+* exporteer de dem_columns.xlsx naar de eigen omgeving
+* kopieer de Excel-kolommen van het laatste jaar
+* "insert copied columns" aan de rechterkant van het laatste jaar
+* In RStudio, maak kopie van de kolomnamen van het nieuwe jaarbestand
+* In Excel, plak die kopie met nieuwe kolomnamen in de col_YYYY van het nieuwe jaar
+* controleer van alle kolommen van het nieuwe jaar qua interpretatie
+* vul handmatig de cln_YYYY kolom in met het kolomnummer referend naar de overeenkomende kolom in generieke dataset (kolom col_cln)
+* save de nieuwe dem_columns.xlsx
+* In RStudio, upload de nieuwe versie naar de parameterfolder
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## -------------------------------------------------------------------------- #
+## ----------- housekeeping ------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## loading libraries -------------------------------------------------------- #
+library(tidyverse)
+library(readxl)
+
+
+## Folders and paths -------------------------------------------------------- #
+dir_parm <- "./parameters/"
+dir_base <- Sys.getenv("POS_DATALAKE")
+
+dir_raw <- paste0(dir_base, "ruwe_data/")
+dir_cln <- paste0(dir_base, "schone_data/")
+dir_lut <- paste0(dir_base, "luts/")
+dir_raw_cbs <- paste0(dir_raw, "CBS/demografie")
+dir_cln_cbs <- paste0(dir_cln, "CBS/demografie/")
+
+fname_parm <- "dem_columns.xlsx"
+fpath_parm <- paste0(dir_parm, fname_parm)
+
+fname_lut_gwb <- "cbs_lut_regios.rds"   ## in: rds met wijk/buurt nrs & names #
+fpath_lut_gwb <- paste0(dir_lut, fname_lut_gwb)
+
+fname_cln_demo <- "cbs_dem_YYYY_ZZZZ.rds"          ## out: gwb's met basis data #
+fpath_cln_demo <- paste0(dir_cln_cbs, fname_cln_demo)
+
+```
+
+
+## Importeren
+
+### Inlezen ruwe data
+
+De bron is ruwe_data/CBS/demografie, waarin de jaarlijkse CBS demografie jaarbestanden beschikbaar zijn.
+
+#### Bestandsgegevens ruwe demografiedata CBS per jaar
+
+* Bron: CBS Open Data Portal
+* Datalake: `ruwe_data/CBS/demografie`
+* Naam: `cbs_dem_YYYY.csv`
+* Freq: Jaarlijks
+* Perioden: vanaf 2004
+
+
+#### Bestandsgegevens schone demografiedata CBS over alle jaren heen
+
+* Datalake: `schone_data/CBS/demografie`
+* Naam: `cbs_dem_YYYY_ZZZZ.rds`
+* Freq: Jaarlijks
+* Perioden: vanaf 2004
+
+
+```{r read, echo=FALSE, warning=FALSE}
+## -------------------------------------------------------------------------- #
+## ----------- inlezen specificatie kolommen / jaar ------------------------- #
+## -------------------------------------------------------------------------- #
+## Ophalen cbs-regio nummers en namen voor wijken en buurten ---------------- #
+## -------------------------------------------------------------------------- #
+print("Overzicht file-processing")
+
+df_col <-read_xlsx(fpath_parm, sheet = "Base")
+
+## -------------------------------------------------------------------------- #
+## ----------- data retrieval ----------------------------------------------- #
+## 1. Data inladen rond demografische gegevens (per buurt, wijk, gemeente)    #
+##    vanuit ruwe_data                                                        #
+## -------------------------------------------------------------------------- #
+## Ophalen folder inhoud demografie kerncijfers wijken en buurten ----------- #
+## -------------------------------------------------------------------------- #
+paden <-list.files(dir_raw_cbs, pattern = "cbs_dem_", full.names = TRUE)
+jaren <- str_remove(str_remove(paden, "/usr/local/share/datalake/ruwe_data/CBS/demografie/cbs_dem_"), ".csv")
+
+## -------------------------------------------------------------------------- #
+## Data inladen (gemiddeld EV voor part. woningen vanuit CBS ---------------- #
+## Note on dplyr::bind_rows
+##    When row-binding, columns are matched by name, 
+##    and any missing columns will be filled with NA
+## Results in dataframe df_demo
+## -------------------------------------------------------------------------- #
+## Prepare an empty df with the generic columns derived from the excel        #
+## -------------------------------------------------------------------------- #
+sel_cols <- df_col$abbr_cln[-1]
+sel_cols <- sel_cols[which(!is.na(sel_cols))]
+base <- setNames(rep("", length(sel_cols)), sel_cols)
+df_template <- bind_rows(base)[0,]
+df_demo <- bind_rows(base)[0,]
+
+## -------------------------------------------------------------------------- #
+## Fill df_demo with the data from approp. columns in the cbs raw demo files  #
+## -------------------------------------------------------------------------- #
+## --- For each cbs source file --------------------------------------------- #
+for (i in seq_along(paden)) {
+  jaar <- jaren[i]
+  df <- read.csv2(paden[i], stringsAsFactors = FALSE) %>% 
+    mutate(jaar = as.character(jaar))
+  print(paste0("From: ", str_remove(paden[i], "/usr/local/share/datalake"),
+               " - rows: ", nrow(df), " - cols: ", ncol(df)))
+
+  nested <- jaar
+  names(nested) <- jaar
+  if (str_detect(jaar, "-")) {
+    nested <- c(rep(min(df$Perioden), max(df$Perioden) - min(df$Perioden) + 1))
+    names(nested) <- c(min(df$Perioden) : max(df$Perioden))
+    }
+
+  ## --- For each year in the cbs source file ------------------------------- #
+  for (j in seq_along(nested)) {
+    nest <- as.character(nested[j])
+    df_raw <- df %>% 
+      filter(jaar == names(nested[j]))
+    cols_in <- df_col %>% 
+      select(ends_with(nest)) %>% 
+      rename(raw = starts_with("raw"),
+             cln = starts_with("cln")) %>% 
+      filter(!is.na(cln))
+    df_tmp <- df_template
+    df_tmp[1:nrow(df_raw),] <- NA
+
+    ## --- For each column of the year within the cbs source file ----------- #
+    for(k in seq_along(cols_in$cln)) {
+      cln_col <- cols_in$cln[k]
+      raw_col <- cols_in$raw[k]
+      df_tmp[,cln_col] <- df_raw[,raw_col]
+      }
+    
+    if (i == 1 & j == 1) {
+      df_demo <- df_tmp
+      min_yr <- nest
+      } else {
+          for (l in c(1:ncol(df_demo))) {
+            if (class(unlist(df_tmp[,l])) == "integer") {
+              df_demo[,l] <- as.integer(as.character(unlist(df_demo[,l])))
+            }
+            if (class(unlist(df_tmp[,l])) == "character") {
+              df_demo[,l] <- as.character(unlist(df_demo[,l]))
+            }
+          }
+          df_demo <- bind_rows(df_demo, df_tmp)
+          max_yr <- nest
+        }
+    print(paste0("added: ", names(nested[j]), 
+                 " - rows: ", nrow(df_tmp), " - cols: ", ncol(df_tmp)))
+    }                                                           ## end year - #
+  }                                                      ## end source file - #
+
+## -------------------------------------------------------------------------- #
+## Some additional cleaning due to differences over the years                 #
+## -------------------------------------------------------------------------- #
+df_demo <- df_demo %>% 
+  mutate(WijkenEnBuurten = if_else(SoortRegio == "Gemeente", 
+                                 str_remove(Codering, "GM"), WijkenEnBuurten),
+         WijkenEnBuurten = if_else(SoortRegio == "Wijk", 
+                                 str_remove(Codering, "WK"), WijkenEnBuurten),
+         WijkenEnBuurten = if_else(SoortRegio == "Buurt", 
+                                 str_remove(Codering, "BU"), WijkenEnBuurten),
+         Gemeentenaam = ifelse(str_detect(Gemeentenaam, "hage"),
+                                 Gemeentenaam, paste0(Gemeentenaam, "age")),
+         k_0Tot15Jaar = ifelse(jaar < "2015", round(k_0Tot15Jaar * AantalInwoners / 100, 0), k_0Tot15Jaar),
+         k_15Tot25Jaar = ifelse(jaar < "2015", round(k_15Tot25Jaar * AantalInwoners / 100, 0), k_15Tot25Jaar),
+         k_25Tot45Jaar = ifelse(jaar < "2015", round(k_25Tot45Jaar * AantalInwoners / 100, 0), k_25Tot45Jaar),
+         k_45Tot65Jaar = ifelse(jaar < "2015", round(k_45Tot65Jaar * AantalInwoners / 100, 0), k_45Tot65Jaar),
+         k_65JaarOfOuder = ifelse(jaar < "2015", round(k_65JaarOfOuder * AantalInwoners / 100, 0), k_65JaarOfOuder),
+         Ongehuwd = ifelse(jaar < "2015", round(Ongehuwd * AantalInwoners / 100, 0), Ongehuwd),
+         Gehuwd = ifelse(jaar < "2015", round(Gehuwd * AantalInwoners / 100, 0), Gehuwd),
+         Gescheiden = ifelse(jaar < "2015", round(Gescheiden * AantalInwoners / 100, 0), Gescheiden),
+         Verweduwd = ifelse(jaar < "2015", round(Verweduwd * AantalInwoners / 100, 0), Verweduwd),
+         WestersTotaal = ifelse(jaar < "2015", round(WestersTotaal * AantalInwoners / 100, 0), WestersTotaal),
+         NietWestersTotaal = ifelse(jaar < "2015", round(NietWestersTotaal * AantalInwoners / 100, 0), NietWestersTotaal),
+         Marokko = ifelse(jaar < "2015", round(Marokko * AantalInwoners / 100, 0), Marokko),
+         NederlandseAntillenEnAruba = ifelse(jaar < "2015", round(NederlandseAntillenEnAruba * AantalInwoners / 100, 0), NederlandseAntillenEnAruba),
+         Suriname = ifelse(jaar < "2015", round(Suriname * AantalInwoners / 100, 0), Suriname),
+         Turkije = ifelse(jaar < "2015", round(Turkije * AantalInwoners / 100, 0), Turkije),
+         OverigNietWesters = ifelse(jaar < "2015", round(OverigNietWesters * AantalInwoners / 100, 0), OverigNietWesters),
+         Eenpersoonshuishoudens = ifelse(jaar < "2015", round(Eenpersoonshuishoudens * HuishoudensTotaal / 100, 0), Eenpersoonshuishoudens),
+         HuishoudensZonderKinderen = ifelse(jaar < "2015", round(HuishoudensZonderKinderen * HuishoudensTotaal / 100, 0), HuishoudensZonderKinderen),
+         HuishoudensMetKinderen = ifelse(jaar < "2015", round(HuishoudensMetKinderen * HuishoudensTotaal / 100, 0), HuishoudensMetKinderen),
+         GemiddeldeHuishoudensgrootte = as.numeric(GemiddeldeHuishoudensgrootte),
+         p_WoningenMetStadsverwarming = as.numeric(p_WoningenMetStadsverwarming),
+         GemiddeldInkomenPerInkomensontvanger = as.numeric(GemiddeldInkomenPerInkomensontvanger),
+         GemiddeldInkomenPerInwoner = as.numeric(GemiddeldInkomenPerInwoner),
+         PersonenautoSPerHuishouden = as.numeric(PersonenautoSPerHuishouden),
+         k_40PersonenMetLaagsteInkomen = as.numeric(k_40PersonenMetLaagsteInkomen),
+         k_20PersonenMetHoogsteInkomen = as.numeric(k_20PersonenMetHoogsteInkomen),
+         k_40HuishoudensMetLaagsteInkomen = as.numeric(k_40HuishoudensMetLaagsteInkomen),
+         k_20HuishoudensMetHoogsteInkomen = as.numeric(k_20HuishoudensMetHoogsteInkomen),
+         GemGestandaardiseerdInkomenVanHuish = as.numeric(GemGestandaardiseerdInkomenVanHuish),
+         p_HuishoudensMetEenLaagInkomen = as.numeric(p_HuishoudensMetEenLaagInkomen),
+         p_HuishOnderOfRondSociaalMinimum = as.numeric(p_HuishOnderOfRondSociaalMinimum),
+         p_HuishoudensTot110VanSociaalMinimum = as.numeric(p_HuishoudensTot110VanSociaalMinimum),
+         p_HuishoudensTot120VanSociaalMinimum = as.numeric(p_HuishoudensTot120VanSociaalMinimum),
+         MediaanVermogenVanParticuliereHuish = as.numeric(MediaanVermogenVanParticuliereHuish),
+         p_JongerenMetJeugdzorg = as.numeric(p_JongerenMetJeugdzorg),
+         AfstandTotHuisartsenpraktijk = as.numeric(AfstandTotHuisartsenpraktijk),
+         AfstandTotGroteSupermarkt = as.numeric(AfstandTotGroteSupermarkt),
+         AfstandTotKinderdagverblijf = as.numeric(AfstandTotKinderdagverblijf),
+         AfstandTotSchool = as.numeric(AfstandTotSchool),
+         ScholenBinnen3Km = as.numeric(ScholenBinnen3Km),
+         across(starts_with("p_"), ~ . / 100))
+
+# df_ff <- df_demo %>%
+#   mutate(across(starts_with("p_"), ~ . / 100))
+
+# @@@ To Dplyr
+# for (i in seq_along(df_demo$Codering)) {
+#   for (j in c(9:24)){
+#     if (df_demo$jaar[i] < "2015") {
+#       df_demo[i,j] <- round(as.numeric(df_demo[i,j]) * as.numeric(df_demo[i,6]) / 100, 0)
+#     }
+#   }
+# }
+# 
+
+
+
+# for (i in seq_along(df_demo$Codering)) {
+#   for (j in c(30:32)){
+#     if (df_demo$jaar[i] < "2015") {
+#       df_demo[i,j] <- round(as.numeric(df_demo[i,j]) * as.numeric(df_demo[i,29]) / 100, 0)
+#     }
+#   }
+# }
+
+## -------------------------------------------------------------------------- #
+## Writing the resulting: Basis Bestand Den Haag                              #
+## -------------------------------------------------------------------------- #
+fname_cln_demo <- paste0("cbs_dem_", min_yr, "_", max_yr, ".rds")
+fpath_cln_demo <- paste0(dir_cln_cbs, fname_cln_demo)
+write_rds(df_demo, fpath_cln_demo)
+
+
+nr_demo <- nrow(df_demo)
+nc_demo <- ncol(df_demo)
+
+## -------------------------------------------------------------------------- #
+## save the resulting lookup demografie table in R-format
+## -------------------------------------------------------------------------- #
+saveRDS(df_demo, file = fpath_cln_demo)
+
+```
+
+| File                         | observaties | variabelen  |
+|:-----------------------------|:-----------:|:-----------:|
+| df_demo (`r fpath_cln_demo`) | `r nr_demo` | `r nc_demo` |
+
+

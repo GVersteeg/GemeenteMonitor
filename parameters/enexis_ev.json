@@ -1,0 +1,16 @@
+{
+    "enexis_data":[
+        {
+            "jaar":"2021",
+            "code":"Enexis_kleinverbruiksgegevens_01012021.csv"
+        },
+        {
+            "jaar":"2020",
+            "code":"Enexis_kleinverbruiksgegevens_01012020.csv"
+        },
+        {
+            "jaar":"2019",
+            "code":"Enexis_kleinverbruiksgegevens_01012019.csv"
+        }
+    ]
+}

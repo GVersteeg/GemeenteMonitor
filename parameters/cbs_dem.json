@@ -1,0 +1,119 @@
+{
+    "cbsodata":[
+        {
+            "jaar":"1995",
+            "code":"37108",
+            "key": "WijkenEnBuurten1995"
+        },
+        {
+            "jaar":"1996",
+            "code":"NA",
+            "key": ""
+        },
+        {
+            "jaar":"1997",
+            "code":"37515",
+            "key": "WijkenEnBuurten1997"
+        },
+        {
+            "jaar":"1998",
+            "code":"NA",
+            "key": ""
+        },
+        {
+            "jaar":"1999",
+            "code":"37681",
+            "key": "WijkenEnBuurten1999"
+        },
+        {
+            "jaar":"2000",
+            "code":"NA",
+            "key": ""
+        },
+        {
+            "jaar":"2001",
+            "code":"70139NED",
+            "key": "Regio"
+        },
+        {
+            "jaar":"2002",
+            "code":"NA",
+            "key": "RegioS"
+        },
+        {
+            "jaar":"2003",
+            "code":"80868ned",
+            "key": "RegioS"
+        },
+        {
+            "jaar":"2004-2008",
+            "code":"81903NED",
+            "key": "RegioS"
+        },
+        {
+            "jaar":"2009-2012",
+            "code":"70904ned",
+            "key": "RegioS"
+        },
+        {
+            "jaar":"2013",
+            "code":"82339NED",
+            "key": "RegioS"
+        },
+        {
+            "jaar":"2014",
+            "code":"82931NED",
+            "key": "WijkenEnBuurten"
+        },
+        {
+            "jaar":"2015",
+            "code":"83220NED",
+            "key": "WijkenEnBuurten"
+        },
+        {
+            "jaar":"2016",
+            "code":"83487NED",
+            "key": "WijkenEnBuurten"
+        },
+        {
+            "jaar":"2017",
+            "code":"83765NED",
+            "key": "WijkenEnBuurten"
+        },
+        {
+            "jaar":"2018",
+            "code":"84286NED",
+            "key": "WijkenEnBuurten"
+        },
+        {
+            "jaar":"2019",
+            "code":"84583NED",
+            "key": "WijkenEnBuurten"
+        },
+        {
+            "jaar":"2020",
+            "code":"84799NED",
+            "key": "WijkenEnBuurten"
+        },
+        {
+            "jaar":"2021",
+            "code":"85039NED",
+            "key": "WijkenEnBuurten"
+        },
+        {
+            "jaar":"2022",
+            "code":"85318NED",
+            "key": "WijkenEnBuurten"
+        },
+        {
+            "jaar":"2023",
+            "code":"85618NED",
+            "key": "WijkenEnBuurten"
+        },
+        {
+            "jaar":"2024",
+            "code":"85984NED",
+            "key": "WijkenEnBuurten"
+        }
+    ]
+}

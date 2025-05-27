@@ -1,0 +1,255 @@
+---
+title: "Inlezen Atlas Leefomgeving"
+author: "Gerrit Versteeg"
+date: "11/04/2025"
+output: pdf_document
+---
+
+## Introductie
+Dit script rapporteert het inlezen van geografische gegevens rond de aandachtsgebieden (risicobronnen en risicocontouren) ten behoeve van externe veiligheid. Hierbinnen vallen:
+
+* Aandachtsgebieden (punten en polygonen)  
+* Risicobronnen (lijnen van vervoer/buisleidingen, punten van ev-activiteiten)  
+* Risico-contouren / veiligheidsafstanden (punten, lijnen en polygonen)  
+
+Lijst resulterende bestanden:
+* qs_vervoer_en_buisleidingenLine.shp  
+* qs_ev_activiteitenPoint.shp  
+* qs_prcontouren_en_veiligheidsafstandenPoint.shp  
+* qs_prcontouren_en_veiligheidsafstandenLine.shp  
+* qs_prcontouren_en_veiligheidsafstandenPolygon.shp  
+* qs_aandachtsgebiedenPoint.shp  
+* qs_aandachtsgebiedenPolygon.shp  
+
+
+## Ruwe WFS-layers aandachtsgebieden
+
+* Bron: https://www.atlasleefomgeving.nl/kaarten  
+* URL: https://apps.geodan.nl/public/data/org/gws/IENW7924REVX/rev_public/wfs?request=GetFeature&service=WFS&typeName=qs_ev_activiteiten,qs_aandachtsgebieden,qs_prcontouren_en_veiligheidsafstanden,qs_vervoer_en_buisleidingen&outputFormat=SHAPE-ZIP  
+* Format: ZIP-file  
+* Periode: 2023  
+* Gebied: Nederland  
+* Datalake: ruwe_data/ALO_atlasleefomgeving/aandachtsgebieden  
+
+
+| Kolnaam                   | Type | Opmerkingen                              |
+|:--------------------------|:-----|:-----------------------------------------|
+| Kolnaam                   | chr  |                                          |
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## -------------------------------------------------------------------------- #
+## ----------- housekeeping ------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## loading libraries -------------------------------------------------------- #
+library(jsonlite)
+library(tidyverse)
+library(sf)
+library(RCurl)
+library(XML)
+
+# -----------------------------------------------------------------------------
+## ------------------------ fresh slate ---------------------------------------
+rm(list=ls())
+
+##--------------------------------------------------------------------------- #
+## Get environment variables ------------------------------------------------ #
+##--------------------------------------------------------------------------- #
+ohg <- Sys.getenv("Onderhanden-Gemeente")
+ohg_name <- str_split(ohg, pattern = " | ")[[1]][1]
+ohg_code <- str_split(ohg, pattern = " | ")[[1]][3]
+ohg_gmcd <- paste0("GM", ohg_code)
+ohg_path <- str_split(ohg, pattern = " | ")[[1]][5]
+pos_dl <- Sys.getenv("POS_DATALAKE")
+
+## Folders and paths -------------------------------------------------------- #
+dir_base <- paste0(pos_dl, ohg_name, "/")
+dir_proj <- dirname(getwd())                    ## remove last folder in path #
+dir_parm <- paste0(dir_proj, "/parameters/")
+
+dir_raw <- paste0(dir_base, "ruwe_data/")
+dir_raw_alo <- paste0(dir_raw, "ALO_atlasleefomgeving/")
+dir.create(dir_raw_alo, showWarnings = FALSE)
+dir_raw_geo <- paste0(dir_raw, "PDOK_PublDVOpKaart/")
+
+fname_parm <- "alo.json"                            ## parameter json for API #
+fpath_parm <- paste0(dir_parm, fname_parm)
+
+fname_geo_gem <- "gemeente_gegeneraliseerd.geojson"        ## gemeentecontour #
+fpath_geo_gem <- paste0(dir_raw_geo, fname_geo_gem)
+
+fname_raw_zip <- "result.zip"        ## temporary file for zipped API-results #
+fpath_raw_zip <- paste0(dir_raw_alo, "/", fname_raw_zip)
+
+fname_raw_xml <- "result.xml"           ## temporary file for xml API-results #
+fpath_raw_xml <- paste0(dir_raw_alo, fname_raw_xml)
+
+fname_tbl_alo <- "feature_table_alo.rds"  ## table with all ALO featurestypes #
+fpath_tbl_alo <- paste0(dir_raw_alo, "/", fname_tbl_alo)
+
+# fname_raw_ag <- "alo_ag_2023.zip"
+# fpath_raw_ag <- paste0(dir_raw_ag, "/", fname_raw_ag)
+# 
+# fname_raw_capqs <- "alo_cap_qs.xml"
+# fpath_raw_capqs <- paste0(dir_raw_alo, fname_raw_capqs)
+# fname_raw_capkgl <- "alo_cap_kgl.xml"
+# fpath_raw_capkgl <- paste0(dir_raw_alo, fname_raw_capkgl)
+# fname_raw_kgl <- "alo_kgl.zip"
+# fpath_raw_kgl <- paste0(dir_raw_kgl, "/", fname_raw_kgl)
+# 
+# fname_tbl_kgl <- "feature_table_kgl.rds"
+# fpath_tbl_kgl <- paste0(dir_raw_kgl, "/", fname_tbl_kgl)
+# 
+# fname_tbl_rev <- "feature_table_rev.rds"
+# fpath_tbl_rev <- paste0(dir_raw_alo, "/", fname_tbl_rev)
+# 
+
+```
+
+
+## Importeren
+
+### Inlezen ruwe data
+
+De bron is de Atlas Leefomgeving (ALO), waarin bestanden beschikbaar zijn o.b.v. een specfieke URL. Die URL's zijn vastgelegd in een JSON-bestand (alo.json) in de parameters folder.
+
+
+```{r read, echo=FALSE, warning=FALSE}
+## -------------------------------------------------------------------------- #
+## ----------- inlezen Ruwe Data REV ---------------------------------------- #
+## -------------------------------------------------------------------------- #
+## ----------- data retrieval ----------------------------------------------- #
+##  -- 1. URL's inladen vanuit parameter-file rev_ev.json  ------------------
+## -------------------------------------------------------------------------- #
+alo_codes <- read_lines(fpath_parm) %>% 
+  fromJSON()
+alo_codes <- alo_codes$alodata
+url_base <- alo_codes$url_base[alo_codes$item == "capabilities"]
+
+url_cap <- paste0(url_base,
+                  alo_codes$req_gcap[alo_codes$item == "capabilities"])
+url_hits <- paste0(url_base,
+                  alo_codes$req_hits[alo_codes$item == "features"])
+url_feat <- paste0(url_base,
+                  alo_codes$req_feat[alo_codes$item == "features"])
+url_names <- paste0(url_base,
+                  alo_codes$req_fnms[alo_codes$item == "fieldnames"])
+
+max_pg <- alo_codes$max_pg[alo_codes$item == "capabilities"]
+
+## -------------------------------------------------------------------------- #
+## Data inladen rond gemeentegrens om een bounding box te maken ------------- #
+##  voor de gemeente, die we kunnen gebruiken bij het filteren -------------- #
+##  van data uit de ev-signaleringskaart ------------------------------------ #
+##  We ronden af, zodat het filteren sneller kan verlopen (lijkt het) ------- #
+## -------------------------------------------------------------------------- #
+sf_gem <- read_sf(fpath_geo_gem) %>% 
+  filter(statcode == ohg_gmcd)
+
+bb_gem <- st_bbox(sf_gem)
+bb_gem[["xmin"]] <- round(bb_gem[["xmin"]], 0)
+bb_gem[["ymin"]] <- round(bb_gem[["ymin"]], 0)
+bb_gem[["xmax"]] <- round(bb_gem[["xmax"]]+1, 0)
+bb_gem[["ymax"]] <- round(bb_gem[["ymax"]]+1, 0)
+
+## -------------------------------------------------------------------------- #
+## -- DEEL 1: KLAARZETTEN URL REQUEST VARIANTEN ALO -------------------------
+## -------------------------------------------------------------------------- #
+req_type <- "request=GetFeature"
+req_serv <- "&service=wfs"
+req_name <- "&typeName="
+#req_form <- "&outputFormat=SHAPE-ZIP"
+req_form <- "&outputFormat=json"
+req_vers <- "&version=2.0.0"
+req_cnt <- "&count=30000"
+req_start <- "&startindex=1"
+req_filt <- paste0("&cql_filter=bronhoudercode=", ohg_gmcd)
+req_bbox <- paste0("&BBOX=", paste(as.integer(bb_gem), collapse = ","))
+
+## ----------- data retrieval ----------------------------------------------- #
+## 1. Data inladen vanuit Atlas Leefomgeving -------------------------------- #
+## -------------------------------------------------------------------------- #
+## Ophalen ALO-capabilities ------------------------------------------------- #
+## https://pdok-ngr.readthedocs.io/data.html
+## 
+## -------------------------------------------------------------------------- #
+xml_cap <- getURL(url_cap)     ## de XML komt met een goede featureTypeList !! 
+data <- read_xml(xml_cap)         ## parse xml-doc into a XML-object using xml2
+data <- xml_ns_strip(data)
+lst_fts <- xml_find_all(data, "//FeatureType")
+
+## start de bouw v.h. dataframe voor beschikbare FeatureTypes
+df_fts <- tibble(
+  name = xml_text(xml_find_all(lst_fts, ".//Name")),
+  title = xml_text(xml_find_all(lst_fts, ".//Title")),
+  abstract = xml_text(xml_find_all(lst_fts, ".//Abstract")),
+  defaultCRS = xml_text(xml_find_all(lst_fts, ".//DefaultCRS"))
+  )
+df_fts <- df_fts %>% 
+  mutate(title = str_remove(title, fixed("\n"))) %>% 
+  mutate(attributes = NA_character_,
+         nr_in_NL = NA_integer_)0
+
+## -------------------------------------------------------------------------- #
+## -- opzetten dataframe for available feature-types in ALO ----------------- # 
+## loop voor het vullen van het dataframe voor beschikbare FeatureTypes ----- #
+## Stap 1. ophalen attribuutnamen voor elk van de beschikbare features ------ #
+## Stap 2. Nederland kent soms erg veel observaties per feature. Dit leidt -- #
+##         tot request-errors. Daarom moeten we op gemeente, provincie ------ #
+##         selecteren. Niet alle features hebben een naam/code waar we op --- #
+##         kunnen selecteren. Soms moeten we een bounding-box gebruiken ----- #
+## Stap 3. Vaststellen aantal observaties van elk van de features ----------- #
+## -------------------------------------------------------------------------- #
+i <- 1
+for (i in seq_along(df_fts$title)) {
+#  vullen standaard feature specs
+  cur_title <- df_fts$title[i]
+  cur_name <- df_fts$name[i]
+  url2get <- str_replace(url_names, "typeName=",
+                        paste0("typeName=", cur_name))
+  xml_names <- getURL(url2get)
+  xml_data <- xmlParse(xml_names)
+  lst_names <- xmlToList(xml_data)
+  lst_names <- 
+    lst_names[["complexType"]][["complexContent"]][["extension"]][["sequence"]]
+  vec_names = c()
+  for (j in seq_along(lst_names)) {
+    velden <- lst_names[[j]]
+    veld <- velden[names(velden) == "name"]
+    vec_names <- c(vec_names, veld)
+  }
+  vec_names <- unname(vec_names)
+  # df_fts$attributes[i] <- list(vec_names)
+  df_fts$attributes[i] <- paste(vec_names, collapse = ", ")
+
+#  vullen aantal voorkomens feature in Nederland
+  url2get <- str_replace(url_hits, "typeName=",
+                        paste0("typeName=", cur_name, req_bbox))
+  xml_hits_NL <- getURL(url2get)
+  xml_hits_NL <- xml_ns_strip(read_xml(xml_hits_NL))
+  hits_NL <- xml_attr(xml_hits_NL, "numberMatched")
+  df_fts$nr_in_NL[i] <- as.numeric(hits_NL)
+}
+
+write_rds(df_fts, fpath_tbl_alo)
+
+## -------------------------------------------------------------------------- #
+## Data inladen (features vanuit ALO in ruwe_date/ALO) ---------------------- #
+## -------------------------------------------------------------------------- #
+for (i in seq_along(df_fts$title)) {
+  cur_title <- df_fts$title[i]
+  cur_name <- df_fts$name[i]
+  cur_file <- paste0(str_remove(cur_name, "alo:"), ".geojson")
+  cur_path <- paste0(dir_raw_alo, cur_file)
+  url_spec <- str_replace(url_feat, "typeName=",
+                        paste0("typeName=", cur_name, req_bbox))
+  error_download <- download.file(url_spec, destfile = cur_path)
+  stopifnot(error_download == 0) 
+  print(paste(i , cur_name, sep = "|"))
+}
+
+## -------------------------------------------------------------------------- #
+## --- End script ----------------------------------------------------------- #
+## -------------------------------------------------------------------------- #

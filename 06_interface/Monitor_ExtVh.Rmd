@@ -1,6 +1,6 @@
 ---
 title: "Monitor Externe Veiligheid V1.0"
-author: "G.Versteeg / L. de Puij"
+author: "G.Versteeg"
 output:
   flexdashboard::flex_dashboard:
   orientation: rows
