@@ -58,10 +58,10 @@ source("../functions/analyzeWFS.R")
 ## Get environment variables ------------------------------------------------ #
 ##--------------------------------------------------------------------------- #
 ohg <- Sys.getenv("Onderhanden-Gemeente")
-ohg_name <- str_split_1(ohg, pattern = " | ")[1]
-ohg_code <- str_split_1(ohg, pattern = " | ")[3]
+ohg_name <- str_split(ohg, pattern = " | ")[[1]][1]
+ohg_code <- str_split(ohg, pattern = " | ")[[1]][3]
 ohg_gmcd <- paste0("GM", ohg_code)
-ohg_path <- str_split_1(ohg, pattern = " | ")[5]
+ohg_path <- str_split(ohg, pattern = " | ")[[1]][5]
 pos_dl <- Sys.getenv("POS_DATALAKE")
 
 ## Folders and paths -------------------------------------------------------- #
@@ -73,6 +73,7 @@ dir_raw <- paste0(dir_base, "ruwe_data/")
 dir_cln <- paste0(dir_base, "schone_data/")
 
 dir_raw_rev <- paste0(dir_raw, "REV_RegExtVeiligheid/")
+dir.create(dir_raw_rev, showWarnings = FALSE)
 dir_raw_geo <- paste0(dir_raw, "PDOK_PublDVOpKaart/")
 
 fname_geo_gem <- "gemeente_gegeneraliseerd.geojson"
@@ -155,7 +156,8 @@ bb_gem[["ymax"]] <- round(bb_gem[["ymax"]]+1, 0)
 req_type <- "request=GetFeature"
 req_serv <- "&service=wfs"
 req_name <- "&typeName="
-req_form <- "&outputFormat=SHAPE-ZIP"
+#req_form <- "&outputFormat=SHAPE-ZIP"
+req_form <- "&outputFormat=json"
 req_vers <- "&version=2.0.0"
 req_cnt <- "&count=30000"
 req_start <- "&startindex=1"

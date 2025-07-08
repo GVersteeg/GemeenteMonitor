@@ -13,7 +13,7 @@
             "code":"NA",
             "url_base":"https://rev-portaal.nl/geoserver/wfs",
             "req_hits":"?request=GetFeature&service=wfs&typeName=&resultType=hits&version=2.0.0",
-            "req_feat":"?request=GetFeature&service=wfs&typeName=&outputFormat=SHAPE-ZIP",
+            "req_feat":"?request=GetFeature&service=wfs&typeName=&outputFormat=application/json",
             "key":"NA"
         },
         {
