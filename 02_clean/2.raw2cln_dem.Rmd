@@ -19,8 +19,11 @@ In deze jaarlijkse bestanden komen allerlei kolommen met demografische gegevens 
 * controleer van alle kolommen van het nieuwe jaar qua interpretatie  
 * vul handmatig de cln_YYYY kolom in met het kolomnummer referend naar de overeenkomende kolom in generieke dataset (kolom col_cln)  
 * save de nieuwe dem_columns.xlsx   
-* In RStudio, upload de nieuwe versie naar de parameterfolder. 
-(7-4-2025: Gedaan tot CBS 2024)
+* In RStudio, upload de nieuwe versie naar de parameterfolder.  
+
+Log:
+7-4-2025: Updated to CBS 2024
+
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -32,25 +35,53 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(readxl)
 
+## -------------------------------------------------------------------------- #
+## ------------------------ fresh slate ---------------------------------------
+## -------------------------------------------------------------------------- #
+rm(list=ls())
+
+## -------------------------------------------------------------------------- #
+## ------------------------ source external functions -------------------------
+## -------------------------------------------------------------------------- #
+## (none needed for this script, but can be added if required)
+
+## -------------------------------------------------------------------------- #
+## ----- Read production parameters -------------------------------------------
+## Switch for controling where the script actually runs:                      #
+## productieomgeving = RStudio Connect (set as variable within the content)   #
+## onderzoeksomgeving = RStudio Server Pro within the UDP                     #
+## ontwikkelomgeving = Possible local development environment outside of UDP  #
+## -------------------------------------------------------------------------- #
 
 ## Folders and paths -------------------------------------------------------- #
-dir_base <- Sys.getenv("POS_DATALAKE")
-dir_proj <- dirname(getwd())                      ## remove last folder in path
+context <- Sys.getenv("CONTEXT")
+ohg <- Sys.getenv("Onderhanden-Gemeente")
+ohg_name <- str_split(ohg, pattern = " | ")[[1]][1]
+ohg_code <- str_split(ohg, pattern = " | ")[[1]][3]
+ohg_gmcd <- paste0("GM", ohg_code)
+ohg_path <- str_split(ohg, pattern = " | ")[[1]][5]
 
-dir_raw <- paste0(dir_base, "ruwe_data/")
-dir_cln <- paste0(dir_base, "schone_data/")
-dir_lut <- paste0(dir_base, "luts/")
-dir_raw_cbs <- paste0(dir_raw, "CBS_CentrBureauStat")
-dir_cln_cbs <- paste0(dir_cln, "monitor/")
+dir_lake <- Sys.getenv("POS_DATALAKE")
+dir_lake <- paste0(dir_lake, ohg_name, "/")
+
+dir_proj <- getwd()            
 dir_parm <- paste0(dir_proj, "/parameters/")
 
-fname_parm <- "cbs_dem_columns.xlsx"
-fpath_parm <- paste0(dir_parm, fname_parm)
+dir_raw <- paste0(dir_lake, "ruwe_data/")
+dir_cln <- paste0(dir_lake, "schone_data/")
+dir_raw_cbs <- paste0(dir_raw, "CBS_CentrBureauStat/")
+dir_meta <- paste0(dir_raw_cbs, "metadata/")  ## metadata folder voor cbs files
+dir_raw_cbs <- paste0(dir_raw_cbs, "demografie")         ## input dir CBS-files
+dir_cln_cbs <- paste0(dir_cln, "cbs/")                 ## schone CBS demografie
+dir_cln_geo <- paste0(dir_cln, "geo/")                  ## schone geo bestanden
 
-fname_lut_gwb <- "cbs_lut_regios.rds"   ## in: rds met wijk/buurt nrs & names #
-fpath_lut_gwb <- paste0(dir_lut, fname_lut_gwb)
+fname_meta <- "cbs_dem_columns.xlsx"
+fpath_meta <- paste0(dir_meta, fname_meta)
 
-fname_cln_dem <- "cbs_dem_YYYY_ZZZZ.rds"        ## out: gwb's met basis data #
+fname_gwb <- "gebiedsgrenzen.rds"         ## in: rds met wijk/buurt nrs & names
+fpath_gwb <- paste0(dir_cln_geo, fname_gwb)
+
+fname_cln_dem <- "cbs_dem_YYYY_ZZZZ.rds"           ## out: gwb's met basis data
 fpath_cln_dem <- paste0(dir_cln_cbs, fname_cln_dem)
 
 ```
@@ -87,7 +118,7 @@ De bron is ruwe_data/CBS/demografie, waarin de jaarlijkse CBS demografie jaarbes
 ## -------------------------------------------------------------------------- #
 print("Overzicht file-processing")
 
-df_col <-read_xlsx(fpath_parm, sheet = "Base")  ## metadata conversie2standaard
+df_col <-read_xlsx(fpath_meta, sheet = "Base")  ## metadata conversie2standaard
 df_coltypes <- df_col %>% 
   select(abbr_cln, type_cln)     ## classes voor alle kolommen in standaard set
 
@@ -190,38 +221,74 @@ for (i in seq_along(paden)) {
 # type_cln <- paste(map_chr(df_tmp$type_cln, ~str_sub(., 1,1)), collapse = "")
 # df_tst <- type_convert(df_dem, type_cln, guess_integer = TRUE)
 ## -------------------------------------------------------------------------- #
-## Bovenstaande doen we even niet, we gebruike type_convert(df), want dan
-## zelf wel even wat de beste class bij de inhoud is                          #
+## Bovenstaande doen we even niet, we gebruiken type_convert(df), want dan    #
+## bepalen we zelf wel even wat de beste class bij de inhoud is               #
 ## -------------------------------------------------------------------------- #
-df_dem <- type_convert(df_dem, guess_integer = TRUE)
+## df_ff <- type_convert(df_dem, guess_integer = TRUE): werkt niet in oude readr
 
-df_dem <- df_dem %>% 
+df_dem %>% 
+  mutate(across(c(WijkenEnBuurten:Codering), ~ as.character(.x)),
+         across(IndelingswijzigingWijkenEnBuurten:BouwjaarAfgelopenTienJaar,
+                ~ as.integer(.x))) %>% 
   select(jaar, everything()) %>% 
   mutate(WijkenEnBuurten = if_else(SoortRegio == "Gemeente", 
-                                 str_remove(Codering, "GM"), WijkenEnBuurten),
+                              str_remove(Codering, "GM"), WijkenEnBuurten),
          WijkenEnBuurten = if_else(SoortRegio == "Wijk", 
-                                 str_remove(Codering, "WK"), WijkenEnBuurten),
+                              str_remove(Codering, "WK"), WijkenEnBuurten),
          WijkenEnBuurten = if_else(SoortRegio == "Buurt", 
-                                 str_remove(Codering, "BU"), WijkenEnBuurten),
-         k_0Tot15Jaar = ifelse(jaar < "2015", round(k_0Tot15Jaar * AantalInwoners / 100, 0), k_0Tot15Jaar),
-         k_15Tot25Jaar = ifelse(jaar < "2015", round(k_15Tot25Jaar * AantalInwoners / 100, 0), k_15Tot25Jaar),
-         k_25Tot45Jaar = ifelse(jaar < "2015", round(k_25Tot45Jaar * AantalInwoners / 100, 0), k_25Tot45Jaar),
-         k_45Tot65Jaar = ifelse(jaar < "2015", round(k_45Tot65Jaar * AantalInwoners / 100, 0), k_45Tot65Jaar),
-         k_65JaarOfOuder = ifelse(jaar < "2015", round(k_65JaarOfOuder * AantalInwoners / 100, 0), k_65JaarOfOuder),
-         Ongehuwd = ifelse(jaar < "2015", round(Ongehuwd * AantalInwoners / 100, 0), Ongehuwd),
-         Gehuwd = ifelse(jaar < "2015", round(Gehuwd * AantalInwoners / 100, 0), Gehuwd),
-         Gescheiden = ifelse(jaar < "2015", round(Gescheiden * AantalInwoners / 100, 0), Gescheiden),
-         Verweduwd = ifelse(jaar < "2015", round(Verweduwd * AantalInwoners / 100, 0), Verweduwd),
-         WestersTotaal = ifelse(jaar < "2015", round(WestersTotaal * AantalInwoners / 100, 0), WestersTotaal),
-         NietWestersTotaal = ifelse(jaar < "2015", round(NietWestersTotaal * AantalInwoners / 100, 0), NietWestersTotaal),
-         Marokko = ifelse(jaar < "2015", round(Marokko * AantalInwoners / 100, 0), Marokko),
-         NederlandseAntillenEnAruba = ifelse(jaar < "2015", round(NederlandseAntillenEnAruba * AantalInwoners / 100, 0), NederlandseAntillenEnAruba),
-         Suriname = ifelse(jaar < "2015", round(Suriname * AantalInwoners / 100, 0), Suriname),
-         Turkije = ifelse(jaar < "2015", round(Turkije * AantalInwoners / 100, 0), Turkije),
-         OverigNietWesters = ifelse(jaar < "2015", round(OverigNietWesters * AantalInwoners / 100, 0), OverigNietWesters),
-         Eenpersoonshuishoudens = ifelse(jaar < "2015", round(Eenpersoonshuishoudens * HuishoudensTotaal / 100, 0), Eenpersoonshuishoudens),
-         HuishoudensZonderKinderen = ifelse(jaar < "2015", round(HuishoudensZonderKinderen * HuishoudensTotaal / 100, 0), HuishoudensZonderKinderen),
-         HuishoudensMetKinderen = ifelse(jaar < "2015", round(HuishoudensMetKinderen * HuishoudensTotaal / 100, 0), HuishoudensMetKinderen),
+                              str_remove(Codering, "BU"), WijkenEnBuurten),
+         k_0Tot15Jaar = ifelse(jaar < "2015", 
+                              round(k_0Tot15Jaar * AantalInwoners / 100, 0), 
+                              k_0Tot15Jaar),
+         k_15Tot25Jaar = ifelse(jaar < "2015", 
+                              round(k_15Tot25Jaar * AantalInwoners / 100, 0), 
+                              k_15Tot25Jaar),
+         k_25Tot45Jaar = ifelse(jaar < "2015", 
+                              round(k_25Tot45Jaar * AantalInwoners / 100, 0), 
+                              k_25Tot45Jaar),
+         k_45Tot65Jaar = ifelse(jaar < "2015", 
+                              round(k_45Tot65Jaar * AantalInwoners / 100, 0), 
+                              k_45Tot65Jaar),
+         k_65JaarOfOuder = ifelse(jaar < "2015", 
+                              round(k_65JaarOfOuder * AantalInwoners / 100, 0), 
+                              k_65JaarOfOuder),
+         Ongehuwd = ifelse(jaar < "2015", 
+                           round(Ongehuwd * AantalInwoners / 100, 0), Ongehuwd),
+         Gehuwd = ifelse(jaar < "2015", 
+                           round(Gehuwd * AantalInwoners / 100, 0), Gehuwd),
+         Gescheiden = ifelse(jaar < "2015", 
+                           round(Gescheiden * AantalInwoners / 100, 0), 
+                           Gescheiden),
+         Verweduwd = ifelse(jaar < "2015", 
+                           round(Verweduwd * AantalInwoners / 100, 0), 
+                           Verweduwd),
+         WestersTotaal = ifelse(jaar < "2015", 
+                           round(WestersTotaal * AantalInwoners / 100, 0), 
+                           WestersTotaal),
+         NietWestersTotaal = ifelse(jaar < "2015", 
+                           round(NietWestersTotaal * AantalInwoners / 100, 0), 
+                           NietWestersTotaal),
+         Marokko = ifelse(jaar < "2015", 
+                          round(Marokko * AantalInwoners / 100, 0), Marokko),
+         NederlandseAntillenEnAruba = ifelse(jaar < "2015", 
+                    round(NederlandseAntillenEnAruba * AantalInwoners / 100, 0), 
+                    NederlandseAntillenEnAruba),
+         Suriname = ifelse(jaar < "2015", 
+                          round(Suriname * AantalInwoners / 100, 0), Suriname),
+         Turkije = ifelse(jaar < "2015", 
+                          round(Turkije * AantalInwoners / 100, 0), Turkije),
+         OverigNietWesters = ifelse(jaar < "2015", 
+                          round(OverigNietWesters * AantalInwoners / 100, 0), 
+                          OverigNietWesters),
+         Eenpersoonshuishoudens = ifelse(jaar < "2015", 
+                    round(Eenpersoonshuishoudens * HuishoudensTotaal / 100, 0), 
+                    Eenpersoonshuishoudens),
+         HuishoudensZonderKinderen = ifelse(jaar < "2015", 
+                  round(HuishoudensZonderKinderen * HuishoudensTotaal / 100, 0), 
+                  HuishoudensZonderKinderen),
+         HuishoudensMetKinderen = ifelse(jaar < "2015", 
+                  round(HuishoudensMetKinderen * HuishoudensTotaal / 100, 0), 
+                  HuishoudensMetKinderen),
          across(starts_with("p_"), ~ . / 100))
 
 ## -------------------------------------------------------------------------- #

@@ -72,8 +72,9 @@ Voorbeeld:
 
 * Bron: CBS Open Data Portal
 * Freq: Jaarlijks
-* Perioden: 2004 tot 2020
-* Datalake: ruwe_data/geo
+* Perioden: Vanaf 2004
+* Datalake: ruwe_data/CBS_CebtrBureauStat/demografie
+* Naam: cbs_dem_YYYY.csv
 
 In deze jaarlijkse bestanden komen allerlei kolommen met demografische gegevens voor, variërend tussen 107 en 182). We selecteren hieruit een aantal kolommen die in alle bestanden voorkomen.
 
