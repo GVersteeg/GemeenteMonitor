@@ -1,0 +1,2815 @@
+---
+title: "Research MER Leerkringen"
+author: "Maarten Reiling, Gerrit Versteeg"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+##    css: styles.css
+    vertical_layout: fill
+---
+
+```{r housekeeping, include=FALSE}
+
+## show current version of R
+cat("R version: ", R.version$version.string, "\n")
+
+
+## load package "pins" binary version 1.0.1 from cran
+install_version("devtools", "1.11.0")
+
+
+## -------------------------------------------------------------------------- #
+## Setting up -----------------------------------------------------------------
+## -------------------------------------------------------------------------- #
+## Exceptions:                                                                # 
+##    1.      devtools::install_github("kent37/summarywidget")                #
+##                                                                            #
+##    2.      UPDATE: Good News! @dmurdoch has submitted a pull request to    #
+##            add support for polylines and polygons. Using his version of    #
+##            crosstalk, you can now filter leaflet lines/polygons if they're #
+##            sp objects (note, it doesn't seem to work with sf yet).         #
+##            First you will need to install this version of crosstalk:       #
+##            devtools::install_github("dmurdoch/leaflet@crosstalk4")         #
+##                                                                            #
+##    3.      install_version("vctrs", version = "0.4.1",                     #
+##                     repos = "http://cran.us.r-project.org")                #
+##            0.5.0 does not work with tidyverse                              #
+##            0.3.1 is too old for tidyverse (min >= 0.3.8)                   #
+##            0.4.1 is same as dev.enviroment                                 #
+## -------------------------------------------------------------------------- #
+library(flexdashboard)
+library(plotly)
+library(tidyverse)
+library(DT)
+library(lubridate)
+library(scales)
+library(usmap)
+library(gridExtra)
+library(mapdeck)
+library(sf)
+library(shiny)
+library(rgdal)
+library(leaflet)
+library(rgeos)
+library(htmltools)
+library(crosstalk)
+library(summarywidget)
+library(zoo)
+library(rsconnect)
+library(pins)
+
+
+## housekeeping
+rm(list=ls()) 
+
+dir_data <- paste0(getwd(),"/data")
+
+fname_cbs_dem <- "/cbs_dem_2004_2021.rds"
+fpath_cbs_dem <- paste0(dir_data, fname_cbs_dem)
+
+fname_geo_brt <- "/buurten_ev.shp"
+fpath_geo_brt <- paste0(dir_data, fname_geo_brt)
+fname_geo_foc <- "/focusgebied_vastgesteld.shp"
+fpath_geo_foc <- paste0(dir_data, fname_geo_foc)
+fname_geo_gem <- "/gemeentegrens.shp"
+fpath_geo_gem <- paste0(dir_data, fname_geo_gem)
+fname_geo_lss <- "/stedin_laagspanningsstations.shp"
+fpath_geo_lss <- paste0(dir_data, fname_geo_lss)
+fname_geo_mss <- "/stedin_middenspanningsstations.shp"
+fpath_geo_mss <- paste0(dir_data, fname_geo_mss)
+fname_geo_lsv <- "/stedin_laagspanningsverbindingen.shp"
+fpath_geo_lsv <- paste0(dir_data, fname_geo_lsv)
+fname_geo_msv <- "/stedin_middenspanningsverbindingen.shp"
+fpath_geo_msv <- paste0(dir_data, fname_geo_msv)
+
+fname_scen01 <- "/scenarios_lk6.gpkg"
+fpath_scen01 <- paste0(dir_data, fname_scen01)
+
+## set parameters
+board_register_rsconnect(
+  key = Sys.getenv("CONNECT_API_KEY"), 
+  server = Sys.getenv("CONNECT_SERVER")
+)
+
+dir.create(dir_data, showWarnings = FALSE)
+
+## -------------------------------------------------------------------------- #
+## Step 01. Get input data from zip on RSConnect data board                   #
+## -------------------------------------------------------------------------- #
+## read files in pinned research data on RSConnect into file-list ----------- #
+fpath_onz_zip <- pin_get("MER_LK_researchdata", 
+                         board = "rsconnect", files = TRUE)
+
+flist_onz <- unzip(fpath_onz_zip, list = TRUE) %>% 
+  mutate(Target = gsub("^.*\\/\\/","", Name),
+         Target = str_remove(Target, ".rds"))
+
+unzip(fpath_onz_zip, exdir = dir_data)
+
+## -------------------------------------------------------------------------- #
+## -- step 1a. READ RDS research files -------------------------------------- #
+## LUT Buurten binnen Focusgebieden ----------------------------------------- #
+target <- paste0(dir_data, "/",
+                 flist_onz$Name[which(str_detect(flist_onz$Target,
+                                          "focusgebied_buurt"))])
+lut_brt_cur <- read_rds(target)
+
+## Energieverbruik per buurt  ----------------------------------------------- #
+target <- paste0(dir_data, "/",
+                 flist_onz$Name[which(str_detect(flist_onz$Target,
+                                          "energie_woningtype"))])
+df_ev_past <- read_rds(target)
+
+## Aantallen woningen per buurt --------------------------------------------- #
+target <- paste0(dir_data, "/",
+                 flist_onz$Name[which(str_detect(flist_onz$Target,
+                                          "woningtype_buurt"))])
+df_wt_past <- read_rds(target)
+
+## Autobezit per buurt ------------------------------------------------------ #
+target <- paste0(dir_data, "/",
+                 flist_onz$Name[which(str_detect(flist_onz$Target,
+                                          "cbs_dem"))])
+df_cbs_past <- read_rds(target)
+
+## -------------------------------------------------------------------------- #
+## --- step 1b. Load GIS-files (stadsdelen, wijken, buurten) ---------------- #
+## -------------------------------------------------------------------------- #
+# epsg:4326 is the WGS84 World Grid that Leaflet uses. Re-project to this --- #
+## -------------------------------------------------------------------------- #
+## --- Load buurten_ev (nieuwe buurten voor scenario EV vs. Woningen) ------- #
+##   + sf_brt: buurten shapes                                   ------------- #
+## --- Load gemeentegrens shape --------------------------------------------- #
+##   + sf_gem: gemeentegrens shape                              ------------- #
+## --- Load focusgebieden shapes -------------------------------------------- #
+##   + sf_foc: focusgebieden                                    ------------- #
+## --- Load Stedin Electriciteitstations/Verbindingen shapes    ------------- #
+##   + sf_lss: Stedin Laagspanningsstations (2022)              ------------- #
+##   + sf_mss: Stedin Middenspanningsstations (2022             ------------- #
+##   + sf_lsv: Stedin Laagspanningsverbindingen (2022)          ------------- #
+##   + sf_msv: Stedin Middenspanningsverbindingen (2022         ------------- #
+## -------------------------------------------------------------------------- #
+sf_gem <- readOGR(fpath_geo_gem)  
+sf_gem <- spTransform(sf_gem, 
+                         CRS("+proj=longlat +ellps=WGS84 +init=epsg:4326"))
+sf_brt <- readOGR(fpath_geo_brt)  
+sf_brt <- spTransform(sf_brt, 
+                         CRS("+proj=longlat +ellps=WGS84 +init=epsg:4326"))
+sf_foc <- readOGR(fpath_geo_foc)  
+sf_foc <- spTransform(sf_foc, 
+                         CRS("+proj=longlat +ellps=WGS84 +init=epsg:4326"))
+sf_lss <- readOGR(fpath_geo_lss)  
+sf_lss <- spTransform(sf_lss, CRS("+proj=longlat +ellps=WGS84 +init=epsg:4326"))
+sf_mss <- readOGR(fpath_geo_mss)  
+sf_mss <- spTransform(sf_mss, CRS("+proj=longlat +ellps=WGS84 +init=epsg:4326"))
+sf_lsv <- readOGR(fpath_geo_lsv)  
+sf_lsv <- spTransform(sf_lsv, CRS("+proj=longlat +ellps=WGS84 +init=epsg:4326"))
+sf_msv <- readOGR(fpath_geo_msv)  
+sf_msv <- spTransform(sf_msv, CRS("+proj=longlat +ellps=WGS84 +init=epsg:4326"))
+
+layer <- st_layers(fpath_scen01)
+sf_scen01_in <- read_sf(fpath_scen01)
+sql <- "SELECT cbs, LS_extrawoning, TS_extrawoning, RS_extrawoning FROM buurten"
+df_scen01_in <- read_sf(fpath_scen01, as_tibble = TRUE, query = sql)
+
+```
+
+```{r prep_scenarios, include=FALSE}
+## -------------------------------------------------------------------------- #
+## Scenario 1: Energiebehoefte versus woningbouw-scenario's ----------------- #
+## -------------------------------------------------------------------------- #
+## Compose dataframes ------------------------------------------------------- #
+## - Data files:                                                ------------- #
+##   + df_scen01: per buurt en woningtype:                      ------------- #
+##                - gem_el: jr.gem Electriciteitsverbruik       ------------- #
+##                - gem_gas: jr.gem Gasverbruik                 ------------- #
+##                - aantal: aantal woningen                     ------------- #
+##                - tot_el: totaal Electriciteitsverbruik       ------------- #
+##                - tot_gas: totaal Gasverbruik                 ------------- #
+##                - focus: Indicator focusgebied                ------------- #
+##                per buurt:                                    ------------- #
+##                - gem_auto: jr.gem Autobezit                  ------------- #
+##                - nr_auto_tot: totaal Autobezit               ------------- #
+## - Shape files:                                               ------------- #
+##   + sf_brt: Buurten (2022)                                   ------------- #
+##   + sf_foc: Focusgebieden (2022)                             ------------- #
+##   + sf_gem: Gemeentegrens (2022)                             ------------- #
+##   + sf_lss: Stedin Laagspanningsstations (2022)              ------------- #
+##   + sf_mss: Stedin Middenspanningsstations (2022             ------------- #
+##   + sf_lsv: Stedin Laagspanningsverbindingen (2022)          ------------- #
+##   + sf_msv: Stedin Middenspanningsverbindingen (2022         ------------- #
+## -------------------------------------------------------------------------- #
+msr_jr <- max(unique(df_ev_past$jaar))     ## last year of measured values -- #
+msr_jr_prev <- as.character(as.numeric(msr_jr)-1)       ## last year -/- 1 -- #
+
+## 1. Combine buurt-informatie     ------------------------------------------ #
+df_ev_past_2bjoined <- df_ev_past %>%    ## prep. jr.gem EV per buurt/won.type for join #
+  filter(code != "Nederland",
+         code != "GM0518") %>% 
+  select(-koop, -huur) %>% 
+  rename(buurt = Buurt,
+         buurtnummer = Buurtnummer) %>% 
+  rename(appartement = app,
+         tussenwoning = tus,
+         hoekwoning = hoek,
+         tweekapper = `2kap`,
+         vrijstaand = vrij,
+         totaal = tot) %>% 
+  mutate(overig = totaal,
+         buurtnummer = str_pad(as.character(buurtnummer), 2, pad = "0")) %>% 
+  pivot_longer(cols = c(totaal, appartement, tussenwoning, hoekwoning,
+                        tweekapper, vrijstaand, overig),
+               names_to = "won_type", values_to = "verbruik") %>% 
+  pivot_wider(id_cols = c(buurt, buurtnummer, code, jaar,won_type),
+              names_from = verbr_type, values_from = verbruik) %>% 
+  arrange(code, jaar, won_type)
+
+df_wt_past_2bjoined <- df_wt_past %>%       ## prepare nr_won per type/buurt for join - #
+  filter(jaar != "2022") %>%
+  rename(overig = overigwoning,
+         buurt = Buurt,
+         buurtnummer = Buurtnummer) %>% 
+  mutate(buurtnummer = str_pad(as.character(buurtnummer), 2, pad = "0")) %>%
+  rowwise() %>% 
+  mutate(appartement = sum(portiekflat, flat, maisonette, 
+                           bovenwoning, benedenwoning, na.rm = TRUE),
+         totaal = sum(overig, tweekapper, tussenwoning, vrijstaand,
+                      hoekwoning, appartement, na.rm = TRUE),
+         buurt = unlist(str_split(buurt, " ", n = 2))[2]) %>% 
+  ungroup() %>% 
+  select(-portiekflat, -flat, -maisonette, -bovenwoning, -benedenwoning) %>% 
+  pivot_longer(cols = c(totaal, appartement, tussenwoning, hoekwoning,
+                        tweekapper, vrijstaand, overig),
+               names_to = "won_type", values_to = "aantal") %>% 
+  rename(buurt_wt = buurt) %>% 
+  arrange(code, jaar, won_type)
+
+lut_brt_cur_2bjoined <- lut_brt_cur %>% ## prepare indicator focusgebied for join - #
+  rename(buurtnummer = buurtnr,
+         buurt = buurtnaam) %>% 
+  mutate(buurtnummer = str_pad(as.character(buurtnummer), 2, pad = "0")) %>% 
+  select(buurt, code, warmtevisie, focus, congestie) %>% 
+  arrange(code)
+
+df_area_cur_2bjoined <- sf_brt@data %>%          ## prepare buurt-area for join - #
+  select(CBS, Shape_Area) %>% 
+  rename(code = CBS,
+         area = Shape_Area) %>% 
+  mutate(code = as.character(code)) %>% 
+  left_join(lut_brt_cur_2bjoined) %>%           ## add focus area from LUT-table - #
+  mutate(area_perc =  100 * area/sum(area),
+         area_foc = if_else(focus, area, 0),
+         area_perc_foc = if_else(focus, 100 * area_foc/sum(area_foc), 0))
+
+df_scen01_past <- df_ev_past_2bjoined %>%      ## join nr_won, gem_el_won, focus - #
+  left_join(df_wt_past_2bjoined) %>%               ## congestie, area, autobezit - #
+  select(-buurt_wt) %>% 
+  rename(gem_el_won = el,
+         gem_gas_won = gas,
+         nr_won = aantal) %>% 
+  mutate(tot_el_won = nr_won * gem_el_won,
+         tot_gas_won = nr_won * gem_gas_won) %>% 
+  left_join(df_area_cur_2bjoined)
+
+## -------------------------------------------------------------------------- #
+## Overige datasets (years measured) ---------------------------------------- #
+jrn_pre <- as.numeric(unique(df_scen01_past$jaar))    ## period: years measured
+
+## -------------------------------------------------------------------------- #
+## Overige datasets (shape file van de buurten in facusgebieden ------------- #
+brt_foc <- lut_brt_cur$code[lut_brt_cur$focus]     ## buurtcodes in focusgebieden
+sf_brt_foc <- sf_brt[sf_brt@data$CBS %in% brt_foc,]
+
+## -------------------------------------------------------------------------- #
+## Setup dataframe met aantal verwachte elektrische auto's ------------------ #
+## Nederlandse aantallen gebaseerd op onderzoek PWC ------------------------- #
+## -------------------------------------------------------------------------- #
+## --- set variables -------------------------------------------------------- #
+auto_ev_km <- 0.2                             ## gem. 20 kWh per  100 km ---- #
+auto_km_jr <- 11000                                ## gem. km's per jaar ---- #
+auto_ev_jr <- auto_km_jr * auto_ev_km      ## gem. jaarverbruik el. auto ---- #
+
+## ---- prepare dataframe for autobezit 2010-2021 per haagse buurt ---------- #
+df_ab_past_brt <- df_cbs_past %>%
+  filter(SoortRegio == "Buurt",
+         jaar %in% as.character(jrn_pre)) %>% 
+  select(Codering, jaar, PersonenautoSPerHuishouden, PersonenautoSTotaal) %>% 
+  rename(code = Codering,
+         gem_auto_tot = PersonenautoSPerHuishouden,
+         nr_auto_tot = PersonenautoSTotaal) %>% 
+  arrange(code, jaar)
+
+df_ab_past_jr <- df_ab_past_brt %>%
+  group_by(jaar) %>% 
+  summarise(gem_auto_tot = mean(gem_auto_tot, na.rm = TRUE),
+            nr_auto_tot = sum(nr_auto_tot, na.rm = TRUE))
+
+## -------------------------------------------------------------------------- #
+## ---- setup dataframe for elektrische auto's 2010-2050 -------------------- #
+## www.rvo.nl/sites/default/files/2021/10/TrendrapportNederlandse-markt-personenautos-2021.pdf
+## www.pwc.nl/nl/assets/documents/pwc-onderzoek-elektrisch-rijden.pdf
+## nederlandelektrisch.nl/actueel/verkoopcijfers
+## EPOL: is extrapolatie terug in de tijd
+## IPOL: is intrapolatie tussen bekende waarden in de tijd
+## -------------------------------------------------------------------------- #
+df_ab_all_nl <- data.frame(jaar = character(),
+                       regio = character(),
+                       bron = character(),
+                       nr_bs = numeric(),
+                       nr_el = numeric(),
+                       nr_tot = numeric(),
+                       nr_lp = numeric(),
+                       stringsAsFactors = FALSE)
+df_ab_all_nl[1,] <- c("2010", "Nederland", "EPOL", NA,   30500,  NA, 10000)
+df_ab_all_nl[2,] <- c("2011", "Nederland", "EPOL", NA,   43000,  NA, 16000)
+df_ab_all_nl[3,] <- c("2012", "Nederland", "EPOL", NA,   55500,  NA, 26000)
+df_ab_all_nl[4,] <- c("2013", "Nederland", "EPOL", NA,   68000,  NA, 36000)
+df_ab_all_nl[5,] <- c("2014", "Nederland", "EPOL", NA,   80500,  NA, 48000)
+df_ab_all_nl[6,] <- c("2015", "Nederland", "EPOL", NA,   93000,  NA, 60000)
+df_ab_all_nl[7,] <- c("2016", "Nederland", "EPOL", NA,  105500,  NA, 72000)
+df_ab_all_nl[8,] <- c("2017", "Nederland", "NLE", NA,  118000,  NA, 90000)
+df_ab_all_nl[9,] <- c("2018", "Nederland", "NLE", NA,  138000,  NA, 100000)
+df_ab_all_nl[10,] <- c("2019", "Nederland", "NLE", NA,  197000,  NA, 137000)
+df_ab_all_nl[11,] <- c("2020", "Nederland", "NLE", NA,  271000,  NA, 177000)
+df_ab_all_nl[12,] <- c("2021", "Nederland", "PWC, NLE", 8400000,  382000,  8800000,  230000)
+df_ab_all_nl[13,] <- c("2030", "Nederland", "PWC", 7500000, 1900000,  9400000, 1700000)
+df_ab_all_nl[14,] <- c("2040", "Nederland", "PWC", 4100000, 5900000, 10000000, 3200000)
+df_ab_all_nl[15,] <- c("2050", "Nederland", "PWC",  700000, 9900000, 10600000, 4800000)
+
+## ---- completeren dataframe for elektrische auto's 2010-2050 -------------- #
+##--  zoo:complete -> add missing rows based on jaar 
+##--  zoo:na.approx -> liniar interpolation of values
+df_ab_all_nl <- df_ab_all_nl %>% 
+  mutate(across(starts_with("nr_"), as.numeric),
+         jaar = as.numeric(jaar)) %>% 
+  complete(jaar = 2010:2050) %>%
+  mutate(regio = "Nederland", bron = "IPOL",
+         nr_bs = round(na.approx(nr_bs, na.rm = FALSE), -3),
+         nr_el = round(na.approx(nr_el, na.rm = FALSE), -3),
+         nr_tot = round(na.approx(nr_tot, na.rm = FALSE), -3),
+         nr_lp = round(na.approx(nr_lp, na.rm = FALSE), -3))
+
+## ---- verhouding totaal aantal auto's in DH versus in NL 2021 ------------- #
+## ---- 2.2% of cars in NL are in DH                            ------------- #
+fct_autos_dh <- df_ab_past_jr$nr_auto_tot[df_ab_all_nl$jaar == 2021] /
+                  df_ab_all_nl$nr_tot[df_ab_all_nl$jaar == 2021]
+
+## ---- adapteer aantallen auto's van nederlandse cijfers naar haagse ------- #
+df_ab_all_dh <- df_ab_all_nl %>%
+  mutate(across(starts_with("nr_"), ~ .x * fct_autos_dh)) %>% 
+  mutate(regio = "Den Haag",
+         jaar = as.character(jaar))
+
+## replace total number of cars for 2010-2021 with number from CBS -----------#
+##    and subtract nr_el from nr_tot to calulate nr_bs -----------------------#
+for (i in seq_along(jrn_pre)) {
+  jr <- as.character(jrn_pre[i])
+  df_ab_all_dh$nr_tot[which(df_ab_all_dh$jaar == jr)] <- 
+                  df_ab_past_jr$nr_auto_tot[which(df_ab_past_jr$jaar == jr)]
+  df_ab_all_dh$nr_bs[which(df_ab_all_dh$jaar == jr)] <- 
+                  df_ab_all_dh$nr_tot[which(df_ab_all_dh$jaar == jr)] - 
+                  df_ab_all_dh$nr_el[which(df_ab_all_dh$jaar == jr)]
+}
+
+## -- add data for elektrische auto's 2010-2050 in df_scen01 ---------------- #
+## weg ## --   won_type 'totaal' remains (it is used to create rows for won_type     #
+## weg ## --   'beng' later on in the script). We multiply the numbers of cars with  #
+## weg ## --   2 so that removing the total rows will result in correct totals       #
+df_scen01_past <- df_scen01_past %>% 
+  #  filter(won_type != "totaal") %>% 
+  left_join(df_ab_all_dh[ , c("jaar", "nr_bs", "nr_el", "nr_tot", "nr_lp")]) %>% 
+  rename(nr_auto_bs = nr_bs,
+         nr_auto_el = nr_el,
+         nr_auto_tot = nr_tot) %>% 
+  group_by(jaar) %>% 
+  mutate(perc_won = 2 * nr_won/sum(nr_won, na.rm = TRUE)) %>% 
+  #  mutate(perc_won = nr_won/sum(nr_won, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(nr_auto_bs = round(nr_auto_bs * perc_won, digits = 0),
+         nr_auto_el = round(nr_auto_el * perc_won, digits = 0),
+         nr_auto_tot = nr_auto_el + nr_auto_bs,
+         nr_lp = round(nr_lp * perc_won, digits = 0)) %>% 
+  arrange(code, jaar, won_type)
+
+## -------------------------------------------------------------------------- #
+## BENG-woningen - Bijna EnergieNeutraal Gebouw ----------------------------- #
+## De energiebehoefte van deze woningen ligt iets boven de 50 kWh/m2 -------- #
+## terwijl de eis voor BENG 1 bij deze woningen op 76 kWh/m2 ligt. ---------- #
+## Dat is 35% lager dan de wettelijke eis. ---------------------------------- #
+## -------------------------------------------------------------------------- #
+## ---- Elektrisch vervoer --- (PWC, CBS)  ---------------------------------- #
+##      Jaar  |  Land (M)              |  Den Haag (k) (3,2% van NL)          #
+##      ----  |   BS   EL   Tot Palen  |   BS   EL   Tot  Palen   kWh         #
+##      2021  |  8,6  0,2   8,8   0,2  |  270    5   275      7    11         #
+##      2030  |  7,5  1,9   9,4   1,7  |  230   60   290     50   132         #
+##      2040  |  4,1  5,9  10,0   3,2  |  130  180   310    100   400         #
+##      2050  |  0,7  9,9  10,6   4,8  |   20  310   330    150   700         #
+## -------------------------------------------------------------------------- #
+## --- set variables -------------------------------------------------------- #
+beng_ev_m2 <- 76                       ## 50 kWh/m3, minimale eis 76 kWh ---- #
+beng_opp <- 71.45                          ## 5430 / 76  (AANNAME, check ---- #
+beng_ev_jr <- round(beng_ev_m2 * beng_opp,
+                 digits = 0)      ## jr.gem El.Verbruik per BENG-woning ----- #
+## -------------------------------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## Setup LUT-table for jaargem, elektriciteitsverbruik BENG-woningen -------- #
+lut_beng <- df_scen01_past %>% 
+  filter(jaar == "2021",
+         won_type != "totaal") %>% 
+  select(code, buurt, won_type, gem_el_won) %>% 
+  group_by(won_type) %>% 
+  summarise(gem_el_won = round(mean(gem_el_won, na.rm = TRUE), digits = 0)) %>% 
+  ungroup() %>% 
+  mutate(opp_EPG_m2 = c(92, 125, 100, 125, 148, 170),
+         opp_dh_m2 = round(opp_EPG_m2 * 0.75, digits = 0),
+         gem_el_kwhm2 = round(gem_el_won / opp_dh_m2, digits = 2),
+         gem_el_beng = opp_dh_m2 * beng_ev_m2,
+         gem_el_beng_wpomp = c(4150, 5995, 5000, 5160, 5995, 7540),
+         gem_el_beng_wnet = c(2449, 4342, 4000, 3672, 4342, 5556)) %>% 
+  mutate(won_type = case_when(str_detect(won_type, "appa") ~ "app",
+                              str_detect(won_type, "hoek") ~ "hkw",
+                              str_detect(won_type, "tussen") ~ "tsw",
+                              str_detect(won_type, "twee") ~ "twk",
+                              str_detect(won_type, "vrij") ~ "vst",
+                              str_detect(won_type, "totaal") ~ "tot",
+                              TRUE ~ "ovg"))
+
+# write_csv2(df_LUT_beng, "LUT_beng.csv")
+
+## -------------------------------------------------------------------------- #
+## Scenario's Omgevingsvisie ------------------------------------------------ #
+## Lokale stad: Den Haag groeit tot maximaal 50.000 nieuwe woningen tot 2040  #
+##   (een deel hiervan is al gerealiseerd). De focus ligt op de bestaande     #
+##   stad en er bestaat een sterke koppeling tussen het fysieke en het        #
+##   sociale domein. De groei / ontwikkelopgave wordt binnen de huidige       #
+##   gemeentegrenzen vormgegeven. De referentienorm is ‘gemengd stedelijk’:   #
+##   een dorps karakter door vraaggericht woningen bouwen in de wijken en     #
+##   voorzieningen op wijkniveau aan brengen. Den Haag krijgt vele groene     #
+##   pocketparkjes die als eilandjes in de wijken liggen. De werkgelegenheid  #
+##   groeit mee met de woningbouw in de wijken en is gericht op maakindustrie #
+##   Bestaande arbeidsplaatsen en werkmilieus blijven behouden, en mogelijk-  #
+##   heden van werken aan huis worden vergroot. Verdichten en beter benutten  #
+##   van bestaande bedrijventerreinen zorgt dat uitbreiding van bedrijven-    #
+##   terreinen nauwelijks aan de orde is. Automobiliteit groeit nog wat,      #
+##   vooral in de wijken, maar er is geen doorgaand autoverkeer door de       #
+##   wijken. Parkeren vindt plaats op eigen terrein of binnen gecentraliseerde#
+##   voorzieningen. De bewoners hebben veelal eigen elektrische auto’s en     #
+##   laadpalen en maken weinig gebruik van deelauto’s. In het openbaar vervoer#
+##   is sprake van een sterke hiërarchie (differentiatie in type OV) van      #
+##   lokaal (fijnmazig) naar en stadsniveau (snel). Met de fiets is alles in  #
+##   de stad binnen 15 minuten bereikbaar over het binnenstedelijk fietsroute-#
+##   netwerk. Verder is er weinig keuze in vervoersopties: Weinig deel-       #
+##   mobiliteit en veel privébezit auto, fiets en bakfietsen. Het voetverkeer #
+##   heeft een centrale rol als onderdeel van wijkleven en is mogelijk door   #
+##   een fijnmazig voetgangersnetwerk en goede oversteekbaarheid van          #
+##   barrières. De energietransitie is kleinschalig van aard en voornamelijk  #
+##   op individuele basis of met kleinschalige collectieve warmtesystemen.    #
+##   De focus ligt op haalbaarheid, betaalbaarheid, keuzevrijheid en          #
+##   verbetering van comfort voor de bewoners.                                #
+## Transitiestad: Den Haag groeit met 50.000 tot 80.000 nieuwe woningen tot   #
+##   2050 met aandacht voor de brede transities: warmte, elektriciteit en     #
+##   mobiliteit. Daarnaast wordt ingezet op klimaatadaptatie en het           #
+##   vergroten van biodiversiteit. De groei- en ontwikkelopgave is gericht op #
+##   selectieve gebieden binnen de gemeentegrenzen. De referentienorm is      #
+##   ‘centrum stedelijk’ met grootschalig groen in delen van de stad en       #
+##   bijzondere aandacht voor milieueducatie. Daarnaast ontwikkeld groot-     #
+##   schalige gecentraliseerde sport, cultuur en andere voorzieningen en is   #
+##   er sprake van goede bereikbaarheid van voorzieningen met fiets en OV.    #
+##   De (verduurzaamde) voorzieningen zijn geschikt voor meervoudig gebruik,  #
+##   zodat ruimte wordt bespaard. Door verdichten, herstructureren en         #
+##   verduurzamen ontstaat ruimte creëren voor innovatieve bedrijven en       #
+##   woonwerkmilieus met focus op economische toplocaties op en rondom        #
+##   knooppunten van HOV. Automobiliteit wordt beperkt tot enkele hoofdroutes #
+##   in de stad, via mobiliteitshubs op centrale locaties buurt, wijk, stad   #
+##   en regioniveau. Veel gebruik van deelauto’s en inzet op lastmile-        #
+##   oplossingen voor stedelijk en regionaal verkeer, maar buurtverkeer       #
+##   gebeurd lopend, fietsend en met Light Elektronic Vehicles. De doorgaande #
+##   fietsstructuur (sterfietsroutes fietsroutes) faciliteert deelfietsen.    #
+##   Het daily urban system en 15-minutenstad worden gekoppeld aan            #
+##   mobiliteitshubs die veel vervoersopties bieden waardoor weinig eigen     #
+##   bezit van voertuigen bestaat. Er bestaat matige aandacht voor piek-      #
+##   momenten, want het systeem is flexibel en mensen hebben meerdere         #
+##   vervoerskeuzes. Vooral in grote autoluwe gebieden liggen goede           #
+##   voetgangersverbindingen naar OV-haltes. In de energietransitie wordt     #
+##   uitgegaan van stadsbrede warmtenetten/warmtesystemen. Daartoe wordt      #
+##   ruimte gemaakt voor bronpunten in de stad zoals geothermie en hubs voor  #
+##   elektra/warmte/opslag (mogelijk conversie).                              #
+## Regiostad: heeft aandacht voor regionale spreiding en gaat uit van een     #
+##   meerkernige ontwikkeling naar 80.000+ woningen. Belangrijk is hier de    #
+##   keuze om bepaalde voorzieningen, bedrijven of woonmilieus niet meer te   #
+##   faciliteren. De groei- en ontwikkelopgave wordt vormgegeven door         #
+##   verdichting in Den Haag en afgestemde regionale programmering. De        #
+##   referentienorm is ‘centrum/hoogstedelijk’. Onderwijs wordt gegeven op    #
+##   regionaal schaalniveau, wat bijzondere specialisaties mogelijk maakt.    #
+##   Grootschalige groenvoorzieningen in de regio en langs de kust bestaan    #
+##   uit de duinen en stadsparken. Er ontstaat een balans in sport-, cultuur- #
+##   en andere voorzieningen vanuit regionaal perspectief bezien. Qua werk-   #
+##   gelegenheid lig de focus op de diensteconomie en het vergroten van een   #
+##   aantal toplocaties voor kantoren. Daarnaast wordt geïnvesteerd in regio- #
+##   naal werkterreinen (t.b.v. logistiek en bouw) en in het intensiveren     #
+##   en/of optoppen van bestaande bedrijventerreinen. Autowegen en trams      #
+##   bewegen op meerdere lagen boven elkaar door de stad en bezoekers parkeren#
+##   aan randen van de stad, waar overgestapt wordt op OV. Eigenlijk is de    #
+##   automobiliteit (combinatie privé en deelmobiliteit) alleen gericht op    #
+##   bestemmingen buiten de Metropoolregio en randstad. OV bestaat uit        #
+##   Randstadrail en lightrailcorridors met een hoge snelheid over de Oude    #
+##   Lijn, Koningscorridor en Zuidwestland corridor, maar ook door hoge       #
+##   sprinterfrequentie op sprinterstations. De doorgaande fietsstructuur     #
+##   wordt gekoppeld aan de grote mobiliteitshubs door onder andere grote     #
+##   fietsenstallingen bij stations en tramhaltes. Ketenmobiliteit , ook met  #
+##   deelfietsen, wordt zo vanzelfsprekend. In de stad bewegen veel bezorg-   #
+##   diensten voor niet-autobezitters, vanwege gecentraliseerde voorzieningen #
+##   Het mobiliteitssysteem heeft veel aandacht voor piekmomenten (zomer-     #
+##   dagen, evenementen). Ten slotte zijn voetgangersverbindingen gericht op  #
+##   grote OV-knooppunten en mobiliteitshubs. Voor de energietransitie wordt  #
+##   ingezet op een regionale bronnenstrategie (industriële restwarmte,       #
+##   geothermie) met extra aandacht voor de robuustheid van het               #
+##   energiesysteem (warmte en elektra).                                      #
+## -------------------------------------------------------------------------- #
+##   Energie, woningen en buurten in de scenario's                            #
+##      Lokale stad: 50k woningen tot 2040, gemengd stedelijk (dorps karakter #
+##                   door vraaggericht woningen -> bouw allerlei woningtypen  #
+##                   gelijkelijk verdeeld over buurten. Elektrische auto's,   #
+##                   eigen laadpalen. Energietransitie individueel            #
+##      Transitiestad: 50-80k woningen tot 2050, centrum stedelijk, bouwen in #
+##                   selectieve gebieden (HOV) -> bouw BENG woningen in       #
+##                   focusgebied, Light Elektronic Vehicles. Brede energie-   #
+##                   transitie (warmte, elektriciteit, mobiliteit) stadsbrede #
+##                   warmtenetten/warmtesystemen                              #
+##      Regiostad: 80k+ woningen, centrum/hoogstedelijk, meerkernig bouwen    #
+##                   door verdichting in Den Haag en afgestemde regionale     #
+##                   programmering, vooral BENG-appartementen?. Geen focus op #
+##                   auto's in de stad (alles aan de rand), Energietransitie  #
+##                   wordt ingezet op een regionale bronnenstrategie          #
+##                   (industriële restwarmte, geothermie) met extra aandacht  #
+##                   voor robuustheid energiesysteem (warmte en elektra).     #
+## -------------------------------------------------------------------------- #
+##      Lokale stad (50.000 gemengde BENG-woningen over alle buurten, 2040)   #
+##      Transitiestad (65.000 ET-proof appart'n in focusgebied buurten, 2050) #
+##      Regiostad (80.000 BENG-appartementen in focusgebied buurten, jaar?)   #
+## -------------------------------------------------------------------------- #
+
+## -------------------------------------------------------------------------- #
+## --SCENARIO INPUT FILE  --------------------------------------------------- #
+##      - buurt [114]                                                         #
+##      - woning-type (app, tsw, hkw, twk, vrs, ovg) [6]                      #
+##      - scenario (LS, TS, RS) [3]                                           #
+##      - jaar (2050) [1]                                                     #
+##      - aantal woningen                                                     #
+##      - jaargemiddeld elektriciteitsverbruik kWh                            #
+## -------------------------------------------------------------------------- #
+## --- read scenario input-file  -------------------------------------------- #
+df_scen01_base <- df_scen01_in %>% 
+  rename(code = cbs,
+         LS = LS_extrawoning,
+         TS = TS_extrawoning, 
+         RS = RS_extrawoning) %>% 
+  pivot_longer(-code, names_to = "scenario", values_to = "nr_won") %>% 
+  mutate(jaar = ifelse(scenario == "LS", "2040", "2050")) %>% 
+  select(jaar, code, scenario, nr_won)
+
+## won_type voor de extra woningen moet nog bepaald worden per scenario ------ #
+##   we gaan eerst de factor bepalen van won_type op totaal woningen per buurt #
+df_wt_cur_brt <- df_wt_past_2bjoined %>% 
+  filter(jaar == "2021",
+         won_type != "totaal") %>% 
+  select(-buurtnummer, - jaar) %>%
+  rename(buurt = buurt_wt,
+         cur = aantal) %>% 
+  mutate(won_type = case_when(str_detect(won_type, "appa") ~ "app",
+                              str_detect(won_type, "hoek") ~ "hkw",
+                              str_detect(won_type, "tussen") ~ "tsw",
+                              str_detect(won_type, "twee") ~ "twk",
+                              str_detect(won_type, "vrij") ~ "vst",
+                              str_detect(won_type, "totaal") ~ "tot",
+                              TRUE ~ "ovg")) %>%
+  group_by(code) %>% 
+  mutate(fct = cur / sum(cur, na.rm = TRUE),
+         cur = replace_na(cur, 0)) %>% 
+  ungroup() %>% 
+  select(code, won_type, cur, fct) %>% 
+  pivot_wider(names_from = won_type, values_from = c(cur, fct))
+
+## Even de factoren bepalen van de won_types over alle buurten heen ----------- #
+df_fct_wt <- df_wt_cur_brt %>% 
+  select(code, starts_with("cur_")) %>%
+  pivot_longer(-code, names_to = "won_type", values_to = "nr_won") %>% 
+  mutate(won_type = str_remove(won_type, "cur_")) %>% 
+  group_by(won_type) %>% 
+  summarise(nr_won = sum(nr_won, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(fct_won = nr_won / sum(nr_won))
+
+## En dan deze perunages gebruiken als een buurt NA's heeft als factor -------- #
+df_wt_cur_brt <- df_wt_cur_brt %>% 
+  mutate(fct_app = ifelse(is.na(fct_app), 
+                          df_fct_wt$fct_won[df_fct_wt$won_type == "app"], fct_app),
+         fct_hkw = ifelse(is.na(fct_hkw), 
+                          df_fct_wt$fct_won[df_fct_wt$won_type == "hkw"], fct_hkw),
+         fct_ovg = ifelse(is.na(fct_ovg), 
+                          df_fct_wt$fct_won[df_fct_wt$won_type == "ovg"], fct_ovg),
+         fct_tsw = ifelse(is.na(fct_tsw), 
+                          df_fct_wt$fct_won[df_fct_wt$won_type == "tsw"], fct_tsw),
+         fct_twk = ifelse(is.na(fct_twk), 
+                          df_fct_wt$fct_won[df_fct_wt$won_type == "twk"], fct_twk),
+         fct_vst = ifelse(is.na(fct_vst), 
+                          df_fct_wt$fct_won[df_fct_wt$won_type == "vst"], fct_vst))
+
+## Daarna gaan we de perunages gebruiken om de extra woningen per buurt te ---- #
+## verdelen per won_type voor scenario LS. Voor de andere scenarios        ---- #
+## worden de extra woningen alleen als appartementen toegevoegd            ---- #
+df_scen01_base <- df_scen01_base %>%
+  left_join(df_wt_cur_brt, by = "code") %>% 
+  rename(xtra_tot = nr_won) %>% 
+  mutate(xtra_app = ifelse(scenario == "LS", xtra_tot * fct_app, xtra_tot),
+         xtra_hkw = ifelse(scenario == "LS", xtra_tot * fct_hkw, 0),
+         xtra_ovg = ifelse(scenario == "LS", xtra_tot * fct_ovg, 0),
+         xtra_tsw = ifelse(scenario == "LS", xtra_tot * fct_tsw, 0),
+         xtra_twk = ifelse(scenario == "LS", xtra_tot * fct_twk, 0),
+         xtra_vst = ifelse(scenario == "LS", xtra_tot * fct_vst, 0)) %>% 
+  select(-starts_with("fct_"), -starts_with("cur"))
+
+## -------------------------------------------------------------------------- #
+## --BEPALEN WONINGBOUW OVER DE JAREN VOOR ELKE SCENARIO -------------------- #
+## -------------------------------------------------------------------------- #
+## --- used variables per scenario
+# nr_won       : totaal extra woningen aan einde scenario
+# start_scen   : start year of scenario
+# end_scen     : end year of scenario
+# end_all      : end year of predictions (for now i.e. 2050)
+# jrn_pre      : past years (measured)
+# jrn_scen     : years during scenario
+# post_exists  : does a post scenario period exist (true/false)
+# jrn_post     : years after scenario
+## --- setup df_addjr 
+# add_app      : aantal appartementen per jaar te bouwen per won_type/buurt
+## -------------------------------------------------------------------------- #
+## Stap 1. opzetten 2010-2021 rows geldend voor alle scenarios  ------------- #
+df_scen01_start <- df_wt_past_2bjoined %>% 
+  select(-buurtnummer) %>%
+  rename(buurt = buurt_wt,
+         nr_won = aantal) %>% 
+  mutate(won_type = case_when(str_detect(won_type, "appa") ~ "app",
+                              str_detect(won_type, "hoek") ~ "hkw",
+                              str_detect(won_type, "tussen") ~ "tsw",
+                              str_detect(won_type, "twee") ~ "twk",
+                              str_detect(won_type, "vrij") ~ "vst",
+                              str_detect(won_type, "totaal") ~ "tot",
+                              TRUE ~ "ovg")) %>%
+  mutate(nr_won = replace_na(nr_won, 0)) %>% 
+  select(jaar, code, won_type, nr_won) %>% 
+  pivot_wider(names_from = won_type, values_from = nr_won)
+
+## -------------------------------------------------------------------------- #
+## --SCENARIO LOKALE STAD --------------------------------------------------- #
+##      Lokale stad (50.000 gemengde BENG-woningen over alle buurten, 2040)   #
+## -------------------------------------------------------------------------- #
+## --- setup variables of scenario
+start_scen <- max(as.numeric(df_scen01_past$jaar)) + 1
+end_scen <- max(as.numeric(df_scen01_base$jaar[df_scen01_base$scenario == "LS"]))
+end_all <- 2050
+jrn_pre <- as.numeric(unique(df_scen01_past$jaar))
+jrn_scen <- c(start_scen:end_scen)
+dur_scen <- length(jrn_scen)
+post_exists <- ifelse(end_scen >= end_all, FALSE, TRUE)
+if (post_exists) jrn_post <- c((end_scen+1):end_all)
+
+## --- setup nr of woningen per type/buurt to add each year
+df_addjr <- df_scen01_base %>% 
+  filter(scenario == "LS") %>%
+  select(-jaar, -scenario) %>% 
+  mutate(add_tot = xtra_tot / length(jrn_scen),
+         add_app = xtra_app / length(jrn_scen),
+         add_hkw = xtra_hkw / length(jrn_scen),
+         add_ovg = xtra_ovg / length(jrn_scen),
+         add_tsw = xtra_tsw / length(jrn_scen),
+         add_twk = xtra_twk / length(jrn_scen),
+         add_vst = xtra_vst / length(jrn_scen)) %>% 
+  select(-starts_with("xtra_"))
+
+## --- add rows to dataframe for scenario LS (part during-scenario) --------- #
+## for-loop over scenario years: use the previous year of observations 
+## (114 brt'n) to determine new number of woningen per won_type for each buurt
+df_scen01_LS <- df_scen01_start %>% 
+  mutate(scenario = "LS")
+
+for (i in seq_along(jrn_scen)) {
+  ## prepare variables
+  cur_jr <- as.numeric(jrn_scen[i])
+  prev_jr <- cur_jr - 1
+  ## make new entries for this year based on the previous year
+  df_add <- df_scen01_LS %>%
+    filter(jaar == as.character(prev_jr)) %>% 
+    rowwise() %>% 
+    mutate(jaar = as.character(cur_jr),
+           tot = tot + df_addjr$add_tot[df_addjr$code == code],
+           app = app + df_addjr$add_app[df_addjr$code == code],
+           hkw = hkw + df_addjr$add_hkw[df_addjr$code == code],
+           ovg = ovg + df_addjr$add_ovg[df_addjr$code == code],
+           tsw = tsw + df_addjr$add_tsw[df_addjr$code == code],
+           twk = twk + df_addjr$add_twk[df_addjr$code == code],
+           vst = vst + df_addjr$add_vst[df_addjr$code == code]) %>% 
+    ungroup()
+  df_scen01_LS <- bind_rows(df_scen01_LS, df_add)
+}
+
+## -------------------------------------------------------------------------- #
+## --- add rows to dataframe for scenario LS (part post-scenario) ----------- #
+## --- keep the number of woningen per won_type the same (no more building) 
+if (post_exists) {
+  for (i in seq_along(jrn_post)) {
+    ## prepare variables
+    cur_jr <- as.numeric(jrn_post[i])
+    prev_jr <- cur_jr - 1
+    ## make new entries for this year based on the previous year
+    df_add <- df_scen01_LS %>%
+      filter(jaar == as.character(prev_jr)) %>% 
+      mutate(jaar = as.character(cur_jr))
+    df_scen01_LS <- bind_rows(df_scen01_LS, df_add)
+  }
+}
+
+sum(df_scen01_LS$tot[df_scen01_LS$jaar == "2050"])
+sum(df_scen01_LS$app[df_scen01_LS$jaar == "2050"])
+sum(df_scen01_LS$vst[df_scen01_LS$jaar == "2050"])
+
+## -------------------------------------------------------------------------- #
+## --SCENARIO TRANSITIE STAD ------------------------------------------------ #
+##      Transitiestad (65.000 ET-proof appart'n in focusgebied buurten, 2050) #
+## -------------------------------------------------------------------------- #
+## --- setup variables of scenario
+start_scen <- max(as.numeric(df_scen01_past$jaar)) + 1
+end_scen <- max(as.numeric(df_scen01_base$jaar[df_scen01_base$scenario == "TS"]))
+end_all <- 2050
+jrn_pre <- as.numeric(unique(df_scen01_past$jaar))
+jrn_scen <- c(start_scen:end_scen)
+dur_scen <- length(jrn_scen)
+post_exists <- ifelse(end_scen >= end_all, FALSE, TRUE)
+if (post_exists) jrn_post <- c((end_scen+1):end_all)
+
+## --- setup nr of woningen per type/buurt to add each year
+df_addjr <- df_scen01_base %>% 
+  filter(scenario == "TS") %>%
+  select(-jaar, -scenario) %>% 
+  mutate(add_tot = xtra_tot / length(jrn_scen),
+         add_app = xtra_app / length(jrn_scen),
+         add_hkw = xtra_hkw / length(jrn_scen),
+         add_ovg = xtra_ovg / length(jrn_scen),
+         add_tsw = xtra_tsw / length(jrn_scen),
+         add_twk = xtra_twk / length(jrn_scen),
+         add_vst = xtra_vst / length(jrn_scen)) %>% 
+  select(-starts_with("xtra_"))
+
+## --- add rows to dataframe for scenario TS (part during-scenario) --------- #
+## for-loop over scenario years: use the previous year of observations 
+## (114 brt'n) to determine new number of woningen per won_type for each buurt
+df_scen01_TS <- df_scen01_start %>% 
+  mutate(scenario = "TS")
+
+for (i in seq_along(jrn_scen)) {
+  ## prepare variables
+  cur_jr <- as.numeric(jrn_scen[i])
+  prev_jr <- cur_jr - 1
+  ## make new entries for this year based on the previous year
+  df_add <- df_scen01_TS %>%
+    filter(jaar == as.character(prev_jr)) %>% 
+    rowwise() %>% 
+    mutate(jaar = as.character(cur_jr),
+           tot = tot + df_addjr$add_tot[df_addjr$code == code],
+           app = app + df_addjr$add_app[df_addjr$code == code],
+           hkw = hkw + df_addjr$add_hkw[df_addjr$code == code],
+           ovg = ovg + df_addjr$add_ovg[df_addjr$code == code],
+           tsw = tsw + df_addjr$add_tsw[df_addjr$code == code],
+           twk = twk + df_addjr$add_twk[df_addjr$code == code],
+           vst = vst + df_addjr$add_vst[df_addjr$code == code]) %>% 
+    ungroup()
+  df_scen01_TS <- bind_rows(df_scen01_TS, df_add)
+}
+
+## -------------------------------------------------------------------------- #
+## --- add rows to dataframe for scenario TS (part post-scenario) ----------- #
+## --- keep the number of woningen per won_type the same (no more building) 
+if (post_exists) {
+  for (i in seq_along(jrn_post)) {
+    ## prepare variables
+    cur_jr <- as.numeric(jrn_post[i])
+    prev_jr <- cur_jr - 1
+    ## make new entries for this year based on the previous year
+    df_add <- df_scen01_TS %>%
+      filter(jaar == as.character(prev_jr)) %>% 
+      mutate(jaar = as.character(cur_jr))
+    df_scen01_TS <- bind_rows(df_scen01_TS, df_add)
+  }
+}
+
+sum(df_scen01_TS$tot[df_scen01_TS$jaar == "2050"])
+sum(df_scen01_TS$app[df_scen01_TS$jaar == "2050"])
+sum(df_scen01_TS$vst[df_scen01_TS$jaar == "2050"])
+
+## -------------------------------------------------------------------------- #
+## --SCENARIO REGIO STAD     ------------------------------------------------ #
+##      Regiostad (80.000 BENG-appartementen in focusgebied buurten, jaar?)   #
+## -------------------------------------------------------------------------- #
+## --- setup variables of scenario
+start_scen <- max(as.numeric(df_scen01_past$jaar)) + 1
+end_scen <- max(as.numeric(df_scen01_base$jaar[df_scen01_base$scenario == "RS"]))
+end_all <- 2050
+jrn_pre <- as.numeric(unique(df_scen01_past$jaar))
+jrn_scen <- c(start_scen:end_scen)
+dur_scen <- length(jrn_scen)
+post_exists <- ifelse(end_scen >= end_all, FALSE, TRUE)
+if (post_exists) jrn_post <- c((end_scen+1):end_all)
+
+## --- setup nr of woningen per type/buurt to add each year
+df_addjr <- df_scen01_base %>% 
+  filter(scenario == "RS") %>%
+  select(-jaar, -scenario) %>% 
+  mutate(add_tot = xtra_tot / length(jrn_scen),
+         add_app = xtra_app / length(jrn_scen),
+         add_hkw = xtra_hkw / length(jrn_scen),
+         add_ovg = xtra_ovg / length(jrn_scen),
+         add_tsw = xtra_tsw / length(jrn_scen),
+         add_twk = xtra_twk / length(jrn_scen),
+         add_vst = xtra_vst / length(jrn_scen)) %>% 
+  select(-starts_with("xtra_"))
+
+## --- add rows to dataframe for scenario RS (part during-scenario) --------- #
+## for-loop over scenario years: use the previous year of observations 
+## (114 brt'n) to determine new number of woningen per won_type for each buurt
+df_scen01_RS <- df_scen01_start %>% 
+  mutate(scenario = "RS")
+
+for (i in seq_along(jrn_scen)) {
+  ## prepare variables
+  cur_jr <- as.numeric(jrn_scen[i])
+  prev_jr <- cur_jr - 1
+  ## make new entries for this year based on the previous year
+  df_add <- df_scen01_RS %>%
+    filter(jaar == as.character(prev_jr)) %>% 
+    rowwise() %>% 
+    mutate(jaar = as.character(cur_jr),
+           tot = tot + df_addjr$add_tot[df_addjr$code == code],
+           app = app + df_addjr$add_app[df_addjr$code == code],
+           hkw = hkw + df_addjr$add_hkw[df_addjr$code == code],
+           ovg = ovg + df_addjr$add_ovg[df_addjr$code == code],
+           tsw = tsw + df_addjr$add_tsw[df_addjr$code == code],
+           twk = twk + df_addjr$add_twk[df_addjr$code == code],
+           vst = vst + df_addjr$add_vst[df_addjr$code == code]) %>% 
+    ungroup()
+  df_scen01_RS <- bind_rows(df_scen01_RS, df_add)
+}
+
+## -------------------------------------------------------------------------- #
+## --- add rows to dataframe for scenario RS (part post-scenario) ----------- #
+## --- keep the number of woningen per won_type the same (no more building) 
+if (post_exists) {
+  for (i in seq_along(jrn_post)) {
+    ## prepare variables
+    cur_jr <- as.numeric(jrn_post[i])
+    prev_jr <- cur_jr - 1
+    ## make new entries for this year based on the previous year
+    df_add <- df_scen01_RS %>%
+      filter(jaar == as.character(prev_jr)) %>% 
+      mutate(jaar = as.character(cur_jr))
+    df_scen01_RS <- bind_rows(df_scen01_RS, df_add)
+  } 
+}
+
+sum(df_scen01_RS$tot[df_scen01_RS$jaar == "2050"])
+sum(df_scen01_RS$app[df_scen01_RS$jaar == "2050"])
+sum(df_scen01_RS$vst[df_scen01_RS$jaar == "2050"])
+
+## -------------------------------------------------------------------------- #
+## ---- Combine all scenarios into one file   ------------------------------- #
+## -------------------------------------------------------------------------- #
+df_scen01_won <- df_scen01_LS %>% 
+  bind_rows(df_scen01_TS) %>% 
+  bind_rows(df_scen01_RS) %>% 
+  select(jaar, code, scenario, app, tsw, hkw, twk, vst, ovg, tot) %>% 
+  rename(nr_app = app,
+         nr_hkw = hkw,
+         nr_ovg = ovg,
+         nr_tot = tot,
+         nr_tsw = tsw,
+         nr_twk = twk,
+         nr_vst = vst)
+
+## -------------------------------------------------------------------------- #
+## ---- Aggregate data per year and per buurt ------------------------------- #
+## -------------------------------------------------------------------------- #
+## ---- Aggregate data per year --------------------------------------------- #
+df_jr_won <- df_scen01_won %>% 
+  group_by(scenario, jaar) %>% 
+  summarise(nr_app = sum(nr_app),
+            nr_hkw = sum(nr_hkw),
+            nr_ovg = sum(nr_ovg),
+            nr_won = sum(nr_tot),
+            nr_tsw = sum(nr_tsw),
+            nr_twk = sum(nr_twk),
+            nr_vst = sum(nr_vst)) %>% 
+  ungroup()
+
+df_2050_won <- df_jr_won %>% 
+  filter(jaar == end_all)
+
+## -------------------------------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## -- Aanvullen woningen file ----------------------------------------------- #
+##      gem_el_won (left_join df_ev_past_tmp)                                 #
+##      tot_el_won (calculate: nr_won * gem_el_won)                           #
+##      tot_el_auto (left_join df_auto)                                       #
+##      @@@@                                                                  #
+## -------------------------------------------------------------------------- #
+## --- setup file voor 2010:2021 om aan te vullen met alle variabelen ------- #
+df_scen01_won_wt <- df_scen01_won %>% 
+  pivot_longer(starts_with("nr_"), 
+               names_to = "won_type", names_prefix = "nr_",
+               values_to = "nr_won")
+
+df_scen01_won_past <- df_scen01_won_wt %>% 
+  filter(as.numeric(jaar) < start_scen)
+
+## -------------------------------------------------------------------------- #
+## --- input file voor 2010:2021 aanvullen met gemeten gem_el_won  ---------- #
+df_past_2bjoined <- df_scen01_past %>%
+  select(jaar, code, buurt, won_type, 
+         gem_el_won, tot_el_won, perc_won,
+         nr_auto_bs, nr_auto_el, nr_auto_tot, nr_lp,
+         focus, congestie, warmtevisie,
+         area, area_perc, area_foc, area_perc_foc) %>% 
+  mutate(won_type = case_when(str_detect(won_type, "appa") ~ "app",
+                              str_detect(won_type, "hoek") ~ "hkw",
+                              str_detect(won_type, "tussen") ~ "tsw",
+                              str_detect(won_type, "twee") ~ "twk",
+                              str_detect(won_type, "vrij") ~ "vst",
+                              str_detect(won_type, "totaal") ~ "tot",
+                              TRUE ~ "ovg"))
+
+df_scen01_details_past <- df_scen01_won_past %>%
+  left_join(df_past_2bjoined) %>% 
+  rename(fct_won = perc_won) %>% 
+  select(-nr_auto_bs, -nr_auto_el, -nr_auto_tot, -nr_lp)
+
+## -------------------------------------------------------------------------- #
+## NB. LAATSTE 'GEMETEN' TOT_EL_WON OPSLAAN (PER BUURT, SCENARIO, WON_TYPE) - #
+## --- dit is nodig omdat we voor de toekomst (nu: 2022 en verder), alleen    #
+## --- beng-womingen gaan bouwen, met veel hoger gem_el_won. We moeten dus de #
+## --- bestaande woningvoorraad met de oude gem_el_won bewaren en alleen      #
+## --- nieuwe woningen tegen het hogere beng-gemiddelde berekenen             #
+## --- i.e. trek van het nieuwe tot_el_won steeds het tot_el_won van het      #
+## --- laatste meetjaar af !                                                  #
+## -------------------------------------------------------------------------- #
+df_tot_el_msrjr <- df_scen01_details_past %>% 
+  filter(jaar == msr_jr) %>%      ## msr_jr: laatste jaar waarover gemeten is #
+  select(code, scenario, won_type, nr_won, tot_el_won) %>% 
+  rename(nr_won_measured = nr_won,
+         tot_el_won_measured = tot_el_won)
+
+## -------------------------------------------------------------------------- #
+## --- input file voor 2022:2050 aanvullen met alle variabelen  -- ---------- #
+## -------------------------------------------------------------------------- #
+df_scen01_won_fut <- df_scen01_won_wt %>% 
+  filter(as.numeric(jaar) >= start_scen)
+
+## -------------------------------------------------------------------------- #
+## --- adds variabelen: gem_el voor warmtenet cq. warmtepomop --------------- #
+lut_beng_2bjoined <- lut_beng %>% 
+  select(won_type, gem_el_beng_wnet, gem_el_beng_wpomp) %>%
+  rename(el_wn = gem_el_beng_wnet,
+         el_wp = gem_el_beng_wpomp) %>% 
+  pivot_longer(starts_with("el_"),
+               names_to = "warmtevisie", names_prefix = "el_",
+               values_to = "gem_el_won")
+
+## -------------------------------------------------------------------------- #
+## --- input file voor 2022:2050 aanvullen met 2bjoined variabelen  --------- #
+df_scen01_details_fut <- df_scen01_won_fut %>% 
+  ## test: filter(code == "BU05184209", scenario == "LS") %>% 
+  filter(as.numeric(jaar) >= start_scen) %>% 
+  ## even warmtevisie joinen, om de join met lut_beng mogelijk te maken    -- #
+  left_join(df_area_cur_2bjoined[,c(1,4)], by = "code") %>% 
+  left_join(lut_beng_2bjoined,                        ## add jr.gem el.verbruik
+            by = c("won_type", "warmtevisie")) %>% 
+  ## calc gewogen gemiddeld el.verbruik over alle woning types heen  -------- #
+  rename(nr = nr_won,
+         el = gem_el_won) %>% 
+  pivot_wider(names_from = won_type, values_from = c(nr, el)) %>% 
+  mutate(el_tot = ((nr_app * el_app) + (nr_hkw * el_hkw) + (nr_tsw * el_tsw) + 
+        (nr_twk * el_twk) + (nr_vst * el_vst) + (nr_ovg * el_ovg)) / nr_tot) %>%
+  pivot_longer(cols = c(starts_with("nr_"), starts_with("el_")), 
+               names_to = c("soort", "won_type"), names_sep = "_",
+               values_to = c("waarde")) %>%
+  pivot_wider(names_from = soort, values_from = waarde) %>% 
+  rename(nr_won = nr,
+         gem_el_won = el) %>% 
+  select(-warmtevisie) %>%   ## warmtevisie niet meer nodig, joins later weer #
+  ## correctie op tot_el_won begin  ----------------------------------------- #
+  ## nu gaan we tot_el_won berekenen, hierbij moeten we corrigeren voor de    #
+  ## bestaande woningvoorraad met het veel lagere gem_el_won, anders gaan we  #
+  ## ook de bestaande woningvoorraad meetellen in de tot_el_won tegen de      #
+  ## hogere beng-gemiddelden                                                  #
+  left_join(df_tot_el_msrjr) %>% 
+  mutate(tot_el_won_add = (nr_won - nr_won_measured) * gem_el_won) %>%
+  mutate(tot_el_won = tot_el_won_add + 
+          ifelse(is.na(tot_el_won_measured), 0, tot_el_won_measured)) %>%
+  select(-tot_el_won_measured, -nr_won_measured, -tot_el_won_add) %>% 
+  ## correctie op tot_el_won einde  ----------------------------------------- #
+  group_by(jaar, scenario) %>% 
+  mutate(fct_won = 2 * nr_won / sum(nr_won)) %>% 
+  ungroup() %>% 
+  left_join(df_area_cur_2bjoined, by = "code")        ## add data area en buurt
+
+## -------------------------------------------------------------------------- #
+## --- combine files from 2010-2021 with 2022:2050  ------------------------- #
+## -------------------------------------------------------------------------- #
+df_scen01_details_tmp <- df_scen01_details_past %>% 
+  bind_rows(df_scen01_details_fut)
+
+## -------------------------------------------------------------------------- #
+## --- setup mobiliteitsvariabelen: nr. autos el, bs, totaal ---------------- #
+lut_mob <- df_ab_all_dh %>%              ## table jaar vs. factor elektr. autos
+#  filter(as.numeric(jaar) >= start_scen) %>% 
+  select(jaar, starts_with("nr_")) %>% 
+  mutate(fct_el = nr_el / nr_tot,
+         fct_bs = nr_bs / nr_tot,
+         fct_lp = nr_lp / nr_el) %>% 
+  select(jaar, starts_with("fct_"))
+
+## table autobezit per won_type (CBS: gem AB per Huishouden = 0.6 !!)
+lut_ab_wt <- data.frame(won_type = character(),
+                       gem_ab_wt = numeric(),
+                       stringsAsFactors = FALSE)
+lut_ab_wt[1,] <- c("app", 0.3)                                      ## aannames
+lut_ab_wt[2,] <- c("tsw", 0.85)
+lut_ab_wt[3,] <- c("hkw", 0.85)
+lut_ab_wt[4,] <- c("twk", 1.2)
+lut_ab_wt[5,] <- c("vst", 1.5)
+lut_ab_wt[6,] <- c("ovg", 1)
+lut_ab_wt[7,] <- c("tot", 0.6)
+lut_ab_wt$gem_ab_wt <- as.numeric(lut_ab_wt$gem_ab_wt)
+
+df_auto_2bjoined_wt <- df_scen01_won_wt %>%        ## nr_won van 2022 tot 2050
+  left_join(lut_mob, by = "jaar") %>%              ## adds factor elektr.autos
+  left_join(lut_ab_wt, by = "won_type") %>%        ## adds gem.auto's/won_type
+  mutate(nr_auto_tot = nr_won * gem_ab_wt,
+         nr_auto_el = nr_auto_tot * fct_el,
+         nr_auto_bs = nr_auto_tot * fct_bs,
+         nr_lp = nr_auto_el * fct_lp)
+
+df_auto_corr_totalen <- df_auto_2bjoined_wt %>%    ## correct won_type; totaal
+  filter(won_type != "tot") %>% 
+  group_by(jaar, code, scenario) %>% 
+  summarise(nr_auto_tot = sum(nr_auto_tot),
+            nr_auto_el = sum(nr_auto_el),
+            nr_auto_bs = sum(nr_auto_bs),
+            nr_lp = sum(nr_lp)) %>% 
+  ungroup() %>% 
+  mutate(won_type = "tot") %>% 
+  select(jaar, code, scenario, won_type, nr_auto_tot, nr_auto_bs, nr_auto_el, nr_lp)
+
+df_auto_2bjoined_wt <- df_auto_2bjoined_wt %>%    ## add correcties to mob-data
+  left_join(df_auto_corr_totalen, by = c("jaar", "code", "scenario", "won_type")) %>% 
+  mutate(nr_auto_bs = ifelse(won_type != "tot", nr_auto_bs.x, nr_auto_bs.y),
+         nr_auto_el = ifelse(won_type != "tot", nr_auto_el.x, nr_auto_el.y),
+         nr_auto_tot = ifelse(won_type != "tot", nr_auto_tot.x, nr_auto_tot.y),
+         nr_lp = ifelse(won_type != "tot", nr_lp.x, nr_lp.y)) %>% 
+  select(-ends_with(".x"), -ends_with(".y"), -nr_won) %>% 
+  select(jaar, code, scenario, won_type, starts_with("nr_"))
+
+## -------------------------------------------------------------------------- #
+## --- combine mobiliteits-data voor 2010:2050 ------------------------------ #
+df_scen01_details <- df_scen01_details_tmp %>% 
+  left_join(df_auto_2bjoined_wt,                         ## add data mobiliteit
+            by = c("jaar", "code", "scenario", "won_type")) %>% 
+  mutate(tot_el_auto = nr_auto_el * auto_ev_jr,
+         tot_el = tot_el_won + tot_el_auto) %>% 
+  select(jaar, code, buurt, scenario, won_type,
+         nr_won, gem_el_won, tot_el_won,
+         nr_auto_bs, nr_auto_el, nr_auto_tot, nr_lp, tot_el_auto, tot_el,
+         focus, congestie, warmtevisie,
+         area, area_perc, area_foc, area_perc_foc, fct_won)
+
+## --- stukje test-script ter controle
+# df_ff <- df_scen01_details %>% 
+#   filter(won_type == "tot",
+#          scenario == "LS") %>% 
+#   select(code, jaar, nr_won, gem_el_won, tot_el_won) %>% 
+#   group_by(jaar) %>% 
+#   summarise(nr_won = sum(nr_won, na.rm = TRUE),
+#             gem_el_won = mean(gem_el_won, na.rm = TRUE),
+#             tot_el_won = sum(tot_el_won, na.rm = TRUE)) %>% 
+#   ungroup()
+
+## -------------------------------------------------------------------------- #
+## --- Add variables to sf_brt (buurten shape file) 2021 en 2050 ------------ #
+## -------------------------------------------------------------------------- #
+sf_brt_details <- sf_brt
+
+vars_id <- c( "jaar", "code", "buurt", "scenario", "won_type")
+vars_brt <- c("focus", "congestie", "warmtevisie",
+              "area", "area_perc", "area_foc", "area_perc_foc")
+vars_scen <- c("nr_won", "fct_won", "gem_el_won", 
+              "nr_auto_bs", "nr_auto_el", "nr_auto_tot", "nr_lp",
+              "tot_el_won", "tot_el_auto", "tot_el")
+
+## --- Add buurt variables to sf_brt (buurten shape file)  ------------------ #
+## -------------------------------------------------------------------------- #
+df_scen01_brtvars <- df_scen01_details %>% 
+  filter(jaar == msr_jr,
+         scenario == "LS",
+         won_type == "tot") %>% 
+  select(code, any_of(vars_brt)) %>% 
+  select(-area)                                  ## already present in sf_brt #
+sf_brt_details@data <- sf_brt_details@data %>% 
+  left_join(df_scen01_brtvars, by = c("CBS" = "code"))
+
+## --- Add scenario variables to sf_brt (buurten shape file)  --------------- #
+## -------------------------------------------------------------------------- #
+df_scen01_scenvars <- df_scen01_details %>%
+  select(-buurt, -any_of(vars_brt)) %>% 
+  filter(jaar == msr_jr | jaar == end_scen) %>%          ## only 2021 en 2050 #
+  filter((jaar == msr_jr & scenario == "LS") | (jaar == end_scen)) %>%  ## only LS for 2021
+  mutate(scenario = ifelse(jaar == msr_jr, "cur", scenario)) %>% 
+  select(-jaar) %>% 
+  pivot_wider(names_from = c(scenario, won_type),
+              names_glue = "{scenario}_{won_type}_{.value}",
+              values_from = any_of(vars_scen))
+sf_brt_details@data <- sf_brt_details@data %>% 
+  left_join(df_scen01_scenvars, by = c("CBS" = "code"))
+
+```
+
+
+A1. Basis op Orde {data-navmenu="Scenarios_OV" data-icon="fa-list"}
+=============================================  
+
+```{r section_A1, include=FALSE}
+## -------------------------------------------------------------------------- #
+## ---- Determine most recent year of measured data ------------------------- #
+## -------------------------------------------------------------------------- #
+
+```
+
+
+Inputs_A.1 {.sidebar}
+-----------------------------------------------------------------------
+**A1. Basis op orde**
+
+Deze kaart laat zien:
+
+* de gemeentegrens  
+* de buurten  
+* de focusgebieden (CID, Zuidwest en Binckhorst)  
+* de focusbuurten (buurten die we toekennen aan focusgebieden)  
+
+Het focusgebied CID valt niet precies over buurtgrenzen heen. Afhankelijk van de precieze overlap zijn buurten aan het CID toegewezen. Dat is nodig omdat we data over ons energieverbruik alleen op buurt niveau kunnen verzamelen.
+
+---
+
+
+Row A1.1 {data-height=50%}
+-----------------------------------------------------------------------
+
+### Map A11. Basis op orde
+
+```{r map_A11, fig.width=20}
+# Define cut points for the colorbins
+# cuts_no2 <- c(0, 10, 15, 20, 25, 30, 35, 40)
+# pal_no2 <- colorBin(palette = "Blues",
+#                 domain = sf_rr_tp@data$no2Conc,
+#                 bins = cuts_no2)
+
+# map
+leaflet(sf_brt) %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>% 
+  addPolygons(data = sf_gem, group = "gemeentegrens",
+    stroke = TRUE, color = "black", weight="0.75",
+    fill = FALSE) %>%
+  addPolygons(data = sf_brt, group = "buurten",
+    stroke = TRUE, color = "brown",
+    weight="1", smoothFactor = 0.3,
+    fillOpacity = 0.3, fillColor = "gray",
+    highlight = highlightOptions(weight = 2, color = "black",
+                                 fillOpacity = 0.3, bringToFront = TRUE),
+    label = ~paste0(sf_brt@data$brt_naam),
+    popup = ~paste0(sf_brt$brt_naam, "<br>",
+                    "- CBS: ", sf_brt@data$CBS, "<br>",
+                    "- Wijk: ", sf_brt@data$wk_naam, "<br>",
+                    "- Stadsdeel: ", sf_brt@data$std_naam)) %>%
+  addPolygons(data = sf_foc, group = "focusgebieden",
+    stroke = TRUE, color = "brown",
+    weight="1", smoothFactor = 0.3,
+    fillOpacity = 0.2, fillColor = "red",
+    highlight = highlightOptions(weight = 2, color = "black",
+                                 fillOpacity = 0.3, bringToFront = TRUE),
+    label = ~paste0(sf_foc@data$naam),
+    popup = ~paste0("<b>", "- Type: ", sf_foc@data$type, "</b>", "<br>",
+                    "<b>", "- Datum: ", "</b>", sf_foc@data$datum, "<br>")) %>%
+  addPolygons(data = sf_brt_foc, group = "focusbuurten",
+    stroke = TRUE, color = "brown",
+    weight="1", smoothFactor = 0.3,
+    fillOpacity = 0.2, fillColor = "purple",
+    highlight = highlightOptions(weight = 2, color = "black",
+                                 fillOpacity = 0.3, bringToFront = TRUE),
+    label = ~paste0(sf_brt_foc@data$brt_naam),
+    popup = ~paste0(sf_brt_foc$brt_naam, "<br>",
+                    "- CBS: ", sf_brt_foc@data$CBS, "<br>",
+                    "- Wijk: ", sf_brt_foc@data$wk_naam, "<br>",
+                    "- Stadsdeel: ", sf_brt_foc@data$std_naam)) %>%
+  addLayersControl(
+    baseGroups = c("basemap (ESRI)"),
+    overlayGroups = c("gemeentegrens", "buurten", "focusgebieden", "focusbuurten"),
+    options = layersControlOptions(collapsed = FALSE))
+
+```
+
+
+A2. Stand van zaken 2021 {data-navmenu="Scenarios_OV" data-icon="fa-list"}
+=============================================  
+
+```{r section_A2, include=FALSE}
+## -------------------------------------------------------------------------- #
+## ---- Gather data --------------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+periode <- c(msr_jr, msr_jr_prev)
+df_A2 <- df_scen01_details %>% 
+  filter(jaar %in% periode,
+         scenario == "LS") %>% 
+  group_by(scenario, jaar, won_type) %>% 
+  summarise(nr_won = sum(nr_won, na.rm = TRUE),
+            gem_el_won = mean(gem_el_won, na.rm = TRUE),
+            tot_el_won = sum(tot_el_won, na.rm = TRUE),
+            nr_auto_el = sum(nr_auto_el, na.rm = TRUE),
+            tot_el_auto = sum(tot_el_auto, na.rm = TRUE),
+            tot_el = sum(tot_el, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  select(-scenario)
+
+
+## -------------------------------------------------------------------------- #
+## ---- Samenstellen selector ----------------------------------------------- #
+## -------------------------------------------------------------------------- #
+# df_ff <- df_scen01_details_fut %>% 
+#   filter(won_type == "tot") %>% 
+#   select(jaar, code, scenario, tot_el_won, gem_el_won) %>% 
+#   arrange(jaar)
+## -------------------------------------------------------------------------- #
+## ---- Setup details table ------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+
+## -------------------------------------------------------------------------- #
+## ---- Setup map data ------------------------------------------------------ #
+## -------------------------------------------------------------------------- #
+
+## -------------------------------------------------------------------------- #
+## create SharedData for CrossTalk ------------------------------------------ #
+## -------------------------------------------------------------------------- #
+
+```
+
+Inputs_A.2 {.sidebar}
+-----------------------------------------------------------------------
+**A2. Energieverbruik tot nu toe**  
+
+Bron voor het energieverbruik van woningen is het CBS (Kerncijfers Regio's)
+
+EL.verbruik: Totaal elektriciteitsverbruik
+
+Gem.ev: Jaargemiddeld elektriciteitsverbruik
+
+NB. Alle cijfers rond energieverbruik zijn in kWh
+
+---
+
+
+```{r}
+
+```
+
+
+Row A2.1 {data-height=15%}
+-----------------------------------------------------------------------
+
+```{r prep_A21}
+## Select --------------------------------------------------------------------
+df_A21_tot <- df_A2 %>% 
+  select(jaar, won_type, tot_el_won, tot_el_auto, tot_el, nr_won) %>%
+  filter(won_type == "tot")
+
+df_A21_gem <- df_A2 %>% 
+  select(jaar, won_type, gem_el_won, nr_won)
+
+df_A2_nr <- df_A2 %>% 
+  filter(jaar == msr_jr) %>% 
+  select(won_type, nr_won, nr_auto_el)
+nr_won <- prettyNum(df_A2_nr$nr_won[df_A2_nr$won_type == "tot"], big.mark = ".", decimal.mark = ",")
+nr_app <- prettyNum(df_A2_nr$nr_won[df_A2_nr$won_type == "app"], big.mark = ".", decimal.mark = ",")
+nr_tsw <- prettyNum(df_A2_nr$nr_won[df_A2_nr$won_type == "tsw"], big.mark = ".", decimal.mark = ",")
+nr_hkw <- prettyNum(df_A2_nr$nr_won[df_A2_nr$won_type == "hkw"], big.mark = ".", decimal.mark = ",")
+nr_twk <- prettyNum(df_A2_nr$nr_won[df_A2_nr$won_type == "twk"], big.mark = ".", decimal.mark = ",")
+nr_vst <- prettyNum(df_A2_nr$nr_won[df_A2_nr$won_type == "vst"], big.mark = ".", decimal.mark = ",")
+nr_ovg <- prettyNum(df_A2_nr$nr_won[df_A2_nr$won_type == "ovg"], big.mark = ".", decimal.mark = ",")
+nr_ela <- prettyNum(round(df_A2_nr$nr_auto_el[df_A2_nr$won_type == "tot"], 
+                          digits = 0), big.mark = ".", decimal.mark = ",")
+
+```
+
+
+### El.verbruik `r nr_won` woningen
+```{r valuebox_A21}
+## Display value -------------------------------------------------------------
+waarde <- round(df_A21_tot$tot_el_won[2], digits = 0)
+sw_higher <- waarde > df_A21_tot$tot_el_won[1]
+valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
+         color = ifelse(sw_higher, "warning", "primary"))
+
+```
+
+### El.verbruik `r nr_ela` autos
+```{r valuebox_A21a}
+## Display value -------------------------------------------------------------
+waarde <- round(df_A21_tot$tot_el_auto[2], digits = 0)
+sw_higher <- waarde > df_A21_tot$tot_el_auto[1]
+valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
+         color = ifelse(sw_higher, "warning", "primary"))
+
+```
+
+### El.verbruik totaal Den Haag
+```{r valuebox_A21b}
+## Display value -------------------------------------------------------------
+waarde <- round(df_A21_tot$tot_el[2], digits = 0)
+sw_higher <- waarde > df_A21_tot$tot_el[1]
+valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
+         color = ifelse(sw_higher, "warning", "primary"))
+
+```
+
+### Gem.ev `r nr_won` Woningen
+```{r valuebox_A21c}
+## Select --------------------------------------------------------------------
+v_waarde <- df_A21_gem %>%
+  filter(won_type == "tot") %>% 
+  select(gem_el_won)
+sw_higher <- v_waarde[2,] > v_waarde[1,]
+waarde <- round(v_waarde$gem_el_won[2], digits = 0)
+## Display value -------------------------------------------------------------
+valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
+         color = ifelse(sw_higher, "warning", "primary"))
+
+```
+
+### Gem.ev `r nr_app` Appartementen
+```{r valuebox_A21d}
+## Select --------------------------------------------------------------------
+v_waarde <- df_A21_gem %>%
+  filter(won_type == "app") %>% 
+  select(gem_el_won)
+sw_higher <- v_waarde[2,] > v_waarde[1,]
+waarde <- round(v_waarde$gem_el_won[2], digits = 0)
+
+## Display value -------------------------------------------------------------
+valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
+         color = ifelse(sw_higher, "warning", "primary"))
+```
+
+### Gem.ev `r nr_tsw` Tussenwoningen
+```{r valuebox_A21e}
+## Select --------------------------------------------------------------------
+v_waarde <- df_A21_gem %>%
+  filter(won_type == "tsw") %>% 
+  select(gem_el_won)
+sw_higher <- v_waarde[2,] > v_waarde[1,]
+waarde <- round(v_waarde$gem_el_won[2], digits = 0)
+
+## Display value -------------------------------------------------------------
+valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
+         color = ifelse(sw_higher, "warning", "primary"))
+```
+
+### Gem.ev `r nr_hkw` Hoekwoningen
+```{r valuebox_A21f}
+## Select --------------------------------------------------------------------
+v_waarde <- df_A21_gem %>%
+  filter(won_type == "hkw") %>% 
+  select(gem_el_won)
+sw_higher <- v_waarde[2,] > v_waarde[1,]
+waarde <- round(v_waarde$gem_el_won[2], digits = 0)
+
+## Display value -------------------------------------------------------------
+valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
+         color = ifelse(sw_higher, "warning", "primary"))
+```
+
+### Gem.ev `r nr_twk` Tweekappers
+```{r valuebox_A21g}
+## Select --------------------------------------------------------------------
+v_waarde <- df_A21_gem %>%
+  filter(won_type == "twk") %>% 
+  select(gem_el_won)
+sw_higher <- v_waarde[2,] > v_waarde[1,]
+waarde <- round(v_waarde$gem_el_won[2], digits = 0)
+
+## Display value -------------------------------------------------------------
+valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
+         color = ifelse(sw_higher, "warning", "primary"))
+```
+
+### Gem.ev `r nr_vst` Vrijstaand
+```{r valuebox_A21h}
+## Select --------------------------------------------------------------------
+v_waarde <- df_A21_gem %>%
+  filter(won_type == "vst") %>% 
+  select(gem_el_won)
+sw_higher <- v_waarde[2,] > v_waarde[1,]
+waarde <- round(v_waarde$gem_el_won[2], digits = 0)
+
+## Display value -------------------------------------------------------------
+valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
+         color = ifelse(sw_higher, "warning", "primary"))
+```
+
+
+Row A2.2 {data-height=85%}
+-----------------------------------------------------------------------
+
+```{r section_A22, include=FALSE}
+## -------------------------------------------------------------------------- #
+## klaarzetten dataframes rond elektriciteitsverbruik ----------------------- #
+## -------------------------------------------------------------------------- #
+## --- Data per woningtype in 2021 ------------------------------------------ #
+sf_A22 <- sf_brt_details 
+sf_A22@data <- sf_A22@data %>% 
+  select(CBS, brt_naam, cur_tot_gem_el_won, cur_tot_tot_el_won) %>%
+  rename(gem_el_won = cur_tot_gem_el_won,
+         tot_el_won = cur_tot_tot_el_won)
+
+df_A22 <- df_scen01_details %>% 
+  filter(as.numeric(jaar) %in% jrn_pre,
+         scenario == "LS") %>% 
+  select(jaar, code, won_type, nr_won, gem_el_won, tot_el_won, tot_el_auto) %>% 
+  group_by(jaar, won_type) %>% 
+  summarise(nr_won = sum(nr_won, na.rm = TRUE),
+            tot_el_won = sum(tot_el_won, na.rm = TRUE),
+            tot_el_auto = sum(tot_el_auto, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(gem_el_won = tot_el_won / nr_won) %>%
+  select(jaar, won_type, gem_el_won, tot_el_won, tot_el_auto) %>% 
+  pivot_longer(cols = c(gem_el_won, tot_el_won, tot_el_auto),
+               names_to = "soort", values_to = "waarde") %>% 
+  mutate(won_type = as.factor(won_type),
+         soort = as.factor(soort),
+         jaar = as.numeric(jaar))
+
+```
+
+
+### Map A221: Jaargemiddeld elektriciteitsverbruik per buurt
+
+```{r Map_A221}
+# Create a function that choose a color palette and assign it to the values
+pal <- colorNumeric(
+  palette = "YlOrRd",
+  domain = sf_A22@data$gem_el_won)
+
+leaflet(sf_A22) %>%
+  addTiles() %>%
+  addPolygons(data = sf_A22, group = "buurten",
+              stroke = TRUE, color = "red",
+              weight="1", smoothFactor = 0.3, fillOpacity = 0.7,
+              fillColor = ~pal(sf_A22@data$gem_el_won),
+              highlight = highlightOptions(weight = 2, color = "red",
+                                           fillOpacity = 0.3,
+                                           bringToFront = TRUE),
+              label = ~paste0(sf_A22@data$brt_naam),
+              popup = ~paste0(sf_A22@data$brt_naam, "<br>",
+                               "- CBS-code: ", sf_A22@data$CBS, "<br>",
+                               "- Totaal EV: ", sf_A22@data$tot_el_won, "<br>",
+                               "- EV per Woning: ", sf_A22@data$gem_el_won))
+
+```
+
+### Map A222: Totaal elektriciteitsverbruik per buurt
+
+```{r Map_A222}
+pal <- colorNumeric(
+  palette = "YlOrRd",
+  domain = sf_A22@data$tot_el_won)
+
+leaflet(sf_A22) %>%
+  addTiles() %>%
+  addPolygons(data = sf_A22, group = "buurten",
+              stroke = TRUE, color = "red",
+              weight="1", smoothFactor = 0.3, fillOpacity = 0.7,
+              fillColor = ~pal(sf_A22@data$tot_el_won),
+              highlight = highlightOptions(weight = 2, color = "red",
+                                           fillOpacity = 0.3,
+                                           bringToFront = TRUE),
+              label = ~paste0(sf_A22@data$brt_naam),
+              popup = ~paste0(sf_A22@data$brt_naam, "<br>",
+                               "- CBS-code: ", sf_A22@data$CBS, "<br>",
+                               "- Totaal EV: ", sf_A22@data$tot_el_won, "<br>",
+                               "- EV per Woning: ", sf_A22@data$gem_el_won))
+
+```
+
+
+### Plot A223 Elektriciteitsverbruiken 2010-2021
+
+```{r plot_A223, echo = FALSE, warning = FALSE, message = FALSE}
+
+## New facet label names for e_type variable
+supp.labs <- c("Gem.EV woningen", "Tot.EV woningen", "Tot.EV autos")
+names(supp.labs) <- c("gem_el_won", "tot_el_won", "tot_el_auto")
+
+ggplot(df_A22, aes(x = jaar, y = waarde, 
+                               group = won_type, color = won_type)) +
+  geom_line() + 
+  labs(y = "") +
+  scale_y_continuous(labels = scales::comma) +
+  facet_grid(rows = vars(soort), scales = "free_y", 
+             labeller = labeller(soort = supp.labs))
+
+```
+
+A3. Scenario verbruik {data-orientation=columns data-navmenu="Scenarios_OV" data-icon="fa-list"}
+=============================================  
+
+```{r section_A3, include=FALSE}
+
+## -------------------------------------------------------------------------- #
+## ---- Samenstellen table met totalen per scenario (2021 & 2050) ----------- #
+## -------------------------------------------------------------------------- #
+periode = c("2021", "2050")
+df_A32 <- df_scen01_details %>% 
+  filter(as.numeric(jaar) %in% periode) %>% 
+  select(jaar, code, buurt, scenario, won_type, nr_won, nr_auto_el, nr_lp,
+         tot_el_won, tot_el_auto, tot_el) %>% 
+  filter(won_type == "tot") %>% 
+  group_by(jaar, scenario) %>% 
+  summarise(nr_won = sum(nr_won, na.rm = TRUE),
+            tot_el_won = sum(tot_el_won, na.rm = TRUE),
+            nr_auto_el = sum(nr_auto_el, na.rm = TRUE),
+            tot_el_auto = sum(tot_el_auto, na.rm = TRUE),
+            tot_el = sum(tot_el, na.rm = TRUE),
+            nr_lp = sum(nr_lp, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  select(jaar, scenario, nr_won, nr_auto_el, nr_lp, tot_el_won, tot_el_auto, tot_el)
+
+df_tbl_A32 <- df_A32 %>% 
+  rename(aantal_woningen = nr_won,
+         aantal_elektr_autos = nr_auto_el,
+         aantal_laadpalen = nr_lp,
+         kWh_woningen = tot_el_won,
+         kWh_autos = tot_el_auto,
+         kWh_totaal = tot_el) %>% 
+  pivot_longer(cols = -c(scenario, jaar), 
+               names_to = "type", values_to = "waarde") %>% 
+  pivot_wider(id_cols = scenario, 
+              names_from = c(jaar, type), names_sep = ".", names_prefix = "jr",
+              values_from = waarde) %>%  
+  mutate(toename.aantal_woningen = jr2050.aantal_woningen - jr2021.aantal_woningen,
+         toename.aantal_elektr_autos = jr2050.aantal_elektr_autos - 
+           jr2021.aantal_elektr_autos,
+         toename.aantal_laadpalen = jr2050.aantal_laadpalen - jr2021.aantal_laadpalen,
+         toename.kWh_woningen = jr2050.kWh_woningen - jr2021.kWh_woningen,
+         toename.kWh_autos = jr2050.kWh_autos - jr2021.kWh_autos,
+         toename.kWh_totaal = jr2050.kWh_totaal - jr2021.kWh_totaal) %>% 
+  pivot_longer(cols = -c(scenario),
+               names_to = c("jaar", "type"), names_sep = "\\.",
+               values_to = "waarde") %>% 
+  mutate(jaar = str_remove(jaar, "jr")) %>% 
+  pivot_wider(id_cols = c(jaar, type),
+              names_from = scenario,
+              values_from = waarde) %>% 
+  rename(lokaal = LS,
+         transitie = TS,
+         regio = RS) %>% 
+  select(jaar, type, lokaal, transitie, regio) %>% 
+## prepare table with display controls
+  mutate(seq = ifelse(jaar == "2021", 1, 
+                      ifelse(jaar == "2050", 2, 3))) %>% 
+  mutate(suppress = ifelse(jaar == lag(jaar), 1, 0),
+         suppress = ifelse(is.na(suppress), 0, suppress))
+
+## -------------------------------------------------------------------------- #
+## ---- Tabel voor sidebar met BENG-aannames -------------------------------- #
+## -------------------------------------------------------------------------- #
+df_tbl_A31 <- lut_beng %>% 
+  select(won_type, gem_el_won, gem_el_beng_wnet, gem_el_beng_wpomp) %>% 
+  rename(type = won_type,
+         huidig = gem_el_won,
+         w.pomp = gem_el_beng_wpomp,
+         w.net = gem_el_beng_wnet)
+
+## -------------------------------------------------------------------------- #
+## create SharedData for CrossTalk ------------------------------------------ #
+## -------------------------------------------------------------------------- #
+# share_tbl_A31 <- SharedData$new(df_tbl_A31, key = ~type, group = "A3")
+share_tbl_A32 <- SharedData$new(df_tbl_A32, key = ~type, group = "A3")
+# share_map_A32 <- SharedData$new(df_map_A32, key = ~dos_id, group = "A3")
+
+```
+
+
+Inputs_A.3 {.sidebar}
+-----------------------------------------------------------------------
+  
+**A3. Scenario's**  
+
+<font size="1em">
+
+Scenario-berekeningen rond de belasting van het electriciteitnetwerk als consequentie van de woningbouw-opgave conform de drie scenario's in de omgevisie Den Haag 2050.
+
+**Aannames**
+
+Het CBS geeft aan dat het gemiddeld autobezit per huishouden in Den Haag **0.6** is.  Tevebns heeft PWC voor het Rijk een onderzoek gedaan naar het verwachte aantal elektrische auto's in 2050. Deze gegevens zijn de basis geweest om het aantal elektriscche auto's te prognotiseren.
+
+Alle nieuwe te bouwen woningen zijn "bijna energieneutrale woningen" (BENG-woning). Hieronder is een tabel weergegeven met het aangenomen jaargemiddeld elektr.verbruik per woningtype, rekening houdend met het type warmtevoorziening vanuit de warmtevisie.
+
+```{r table_A0S}
+
+NumCols <- 1:ncol(df_tbl_A31)
+
+df_tbl_A31 %>% 
+  DT::datatable(rownames = FALSE,
+                options = list(dom = "t",
+                               bPaginate=FALSE, scrollY = "250px",
+                               select = list(style = 'multiple', items = 'row'),
+                               autoWidth = TRUE, paging=FALSE,
+                               class = "compact",
+                               # headerCallback = DT::JS(
+                               #    "function(thead) {",
+                               #    "  $(thead).css('font-size', '0.7em');",
+                               #    "}" ),
+                               fillContainer = TRUE))
+
+```
+
+</font>
+
+---
+
+```{r}
+filter_checkbox("A3", "Type meting", share_tbl_A32, ~type,
+                 inline = FALSE)
+
+```
+
+
+Column A3.1 {data-width=60%}
+-----------------------------------------------------------------------
+
+### Table A32 Overzichtstabel scenarios (2021 versus 2050)
+```{r table_A32}
+## prepare table for display
+
+## display table
+NumCols <- 1:ncol(df_tbl_A32)
+
+share_tbl_A32 %>% 
+  DT::datatable(rownames = FALSE,
+                options = list(dom = "t", 
+                               bPaginate=FALSE, scrollY = "400px",
+                               autoWidth = TRUE, paging=FALSE, 
+                               class = "compact",
+                               columnDefs = list(
+                                 list(visible = FALSE,
+                                      targets = c(5,6))),
+                               fillContainer = TRUE)) %>%
+  DT::formatStyle(columns = NumCols, 'vertical-align'='top') %>% 
+  DT::formatStyle('seq', target = 'row', 
+                  backgroundColor = styleEqual(c(1, 2, 3), 
+                                               c('#EEFFFF', '#EEFFEE', '#FDE7E8'))) %>% 
+  DT::formatStyle('jaar', 'suppress', 
+                  color = styleEqual(c(0, 1), c('#000000', '#F2F2F2'))) %>% 
+  DT::formatCurrency(3:5, currency = '', digits = 0, mark = ".")
+
+```
+
+Column A3.2 {data-width=40%}
+-----------------------------------------------------------------------
+
+### Plot A32a. Scenario: Lokale stad (+50k woningen in 2040)
+
+```{r plot_A32a, echo = FALSE, warning = FALSE, message = FALSE}
+
+## transform df_scen01_details to fit plot ---------------------------------- #
+df_plot_A32 <- df_scen01_details %>% 
+  filter(won_type == "tot") %>% 
+  mutate(jaar = as.numeric(jaar)) %>% 
+  select(jaar, code, scenario, won_type, tot_el_won, tot_el_auto, tot_el) %>%
+  group_by(jaar, scenario) %>% 
+  summarise(tot_el_won = sum(tot_el_won, na.rm = TRUE),
+            tot_el_auto = sum(tot_el_auto, na.rm = TRUE),
+            tot_el = sum(tot_el, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  rename(woningen = tot_el_won,
+         autos = tot_el_auto,
+         totaal = tot_el) %>% 
+  pivot_longer(cols = c("woningen", "autos", "totaal"),
+               names_to = "type", values_to = "verbruik") %>% 
+  mutate(verbruik = verbruik / 1000000)                     ## van kWh naar GWh
+
+## select and display ------------------------------------------------------- #
+ggplot(df_plot_A32[df_plot_A32$scenario == "LS",],
+       aes(x = jaar, y = verbruik, group = type, color = type)) +
+  geom_line() + 
+  labs(y = "Verbruik (GWh)")
+
+```
+
+### Plot A32b. Scenario: Transitiestad (+65k woningen in 2050)
+
+```{r plot_D32b, echo = FALSE, warning = FALSE, message = FALSE}
+
+## select and display ------------------------------------------------------- #
+ggplot(df_plot_A32[df_plot_A32$scenario == "TS",],
+       aes(x = jaar, y = verbruik, group = type, color = type)) +
+  geom_line() + 
+  labs(y = "Verbruik (GWh)")
+
+```
+
+### Plot A32c. Scenario: Regiostad (+80k woningen in 2050)
+
+```{r plot_D32c, echo = FALSE, warning = FALSE, message = FALSE}
+
+## select and display ------------------------------------------------------- #
+ggplot(df_plot_A32[df_plot_A32$scenario == "RS",],
+       aes(x = jaar, y = verbruik, group = type, color = type)) +
+  geom_line() + 
+  labs(y = "Verbruik (GWh)")
+
+```
+
+
+A4. Schaarste elektriciteit {data-orientation=columns data-navmenu="Scenarios_OV" data-icon="fa-list"}
+=============================================  
+
+Inputs_A.4 {.sidebar}
+-----------------------------------------------------------------------
+  
+**A4. Schaarste aan elektriciteit**  
+
+<font size="1em">
+
+De levering van elektricteit aan woningen en bedrijven neemt toe. Dit wordt vooral veroorzaakt door beperkingen in het elektriciteitsnetwerk. 
+
+De afbeeldingen hiernaast zijn afgeleid van de Capaciteitskaart Netbeheer Nederland en tonen de situatie per februari 2023 in Nederland als geheel en de situatie voor Den Haag specifiek. Den Haag komt er nog genadig af, sommige buurten kennen een dreigende transportschaartse en de overige buurten zijn voorlopig 'veilig'.
+
+---
+
+Legenda afbeeldingen links:
+
+```{r picture_A42, echo = F, out.width = '100%'}
+knitr::include_graphics(paste0(dir_data, "/Legenda_ES.png"))
+
+```
+
+---
+
+Op de kaart rechts wordt getoond in welke buurten in Den Haag de transportschaarste precies en of dit voor hele buurt geldt of slechts een gedeelte:
+
+Legenda kaart rechts:
+
+```{r picture_A43, echo = F, out.width = '100%'}
+knitr::include_graphics(paste0(dir_data, "/Legenda_ESbrt.png"))
+
+```
+
+
+</font>
+
+
+
+---
+
+Column A4.1 {data-width=30%}
+-----------------------------------------------------------------------
+### Pic A41a. Electriciteitsschaarste Nederland
+
+```{r picture_A41a, echo = F, out.width = '100%'}
+knitr::include_graphics(paste0(dir_data, "/El_schaarste_NL.png"))
+```
+
+### Pic A41b. Electriciteitsschaarste Den Haag
+
+```{r picture_A41b, echo = F, out.width = '100%'}
+knitr::include_graphics(paste0(dir_data, "/El_schaarste_DH.png"))
+```
+
+
+Column A4.2 {data-width=70%}
+-----------------------------------------------------------------------
+
+### Map A42. Buurten met en zonder transportschaarste
+
+```{r map_A42}
+## make shape file specific to this map
+sf_A42 <- sf_brt_details
+sf_A42@data <- sf_A42@data %>% 
+  select(c(1:23))
+
+# map
+leaflet(sf_A42) %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>% 
+  addPolygons(data = sf_gem, group = "gemeentegrens",
+    stroke = TRUE, color = "black", weight="0.75",
+    fill = FALSE) %>%
+  addPolygons(data = sf_A42, group = "buurten",
+    stroke = TRUE, color = "brown",
+    weight = "1", smoothFactor = 0.3,
+    fillOpacity = 0.3, 
+    fillColor = ~ifelse(sf_A42@data$congestie == "Ja", "orange",
+                        ifelse(sf_A42@data$congestie == "Nee", "green",
+                               "yellow")),
+    highlight = highlightOptions(weight = 2, color = "black",
+                                 fillOpacity = 0.3, bringToFront = TRUE),
+    label = ~paste0(sf_A42@data$brt_naam),
+    popup = ~paste0(sf_A42$brt_naam, "<br>",
+                    "- CBS-code: ", sf_A42@data$CBS, "<br>",
+                    "- Wijk: ", sf_A42@data$wk_naam, "<br>",
+                    "- Stadsdeel: ", sf_A42@data$std_naam)) %>%
+  addPolygons(data = sf_foc, group = "focusgebieden",
+    stroke = TRUE, color = "brown",
+    weight="1", smoothFactor = 0.3,
+    fillOpacity = 0.2, fillColor = "red",
+    highlight = highlightOptions(weight = 2, color = "black",
+                                 fillOpacity = 0.3, bringToFront = TRUE),
+    label = ~paste0(sf_foc@data$naam),
+    popup = ~paste0("<b>", "- Type: ", sf_foc@data$type, "</b>", "<br>",
+                    "<b>", "- Datum: ", "</b>", sf_foc@data$datum, "<br>")) %>%
+  addLayersControl(
+    baseGroups = c("basemap (ESRI)"),
+    overlayGroups = c("gemeentegrens", "buurten", "focusgebieden"),
+    options = layersControlOptions(collapsed = FALSE))
+
+```
+
+A5. Elektriciteitsnetwerk {data-orientation=columns data-navmenu="Scenarios_OV" data-icon="fa-list"}
+=============================================  
+
+Inputs_A.5 {.sidebar}
+-----------------------------------------------------------------------
+  
+**A5. Capaciteit elektriciteitsnetwerk**  
+
+<font size="1em">
+
+De kaart hiernaast laat het elektriciteitsnetwerk zien op de achtergrond van de Haagse buurten. 
+
+Legenda
+
+```{r picture_A52, echo = F, out.width = '100%'}
+knitr::include_graphics(paste0(dir_data, "/Legenda_EVbd.png"))
+```
+
+</font>
+
+
+---
+
+
+Column A5.2
+-----------------------------------------------------------------------
+
+### Map A52. Overzicht elektriciteitsnetwerk met en zonder transportschaarste
+
+```{r map_A52}
+## make shape file specific to this map
+sf_A52 <- sf_brt_details
+sf_A52@data <- sf_A52@data %>% 
+  select(c(1:23))
+
+# map
+leaflet(sf_A52) %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>% 
+  addPolylines(data = sf_lsv, group = "netwerk - laag",
+              stroke = TRUE,
+              color = ~ifelse(sf_lsv@data$congestie == "Geen",
+                                  "green", "orange"),
+              weight="1", smoothFactor = 0.3, fillOpacity = 0.7,
+              fillColor = "White") %>%
+  addPolylines(data = sf_msv, group = "netwerk - midden",
+              stroke = TRUE,
+              color = ~ifelse(sf_msv@data$congestie == "Geen",
+                                  "black", "red"),
+              weight="2", smoothFactor = 0.3, fillOpacity = 0.7,
+              fillColor = "white") %>%
+  addPolygons(data = sf_A52, group = "buurten",
+    stroke = TRUE, color = "brown",
+    weight = "1", smoothFactor = 0.3,
+    fillOpacity = 0.1, fillColor = "gray",
+    highlight = highlightOptions(weight = 2, color = "black",
+                                 fillOpacity = 0.3, bringToFront = TRUE),
+    label = ~paste0(sf_A52@data$brt_naam),
+    popup = ~paste0(sf_A52$brt_naam, "<br>",
+                    "- CBS-code: ", sf_A52@data$CBS, "<br>",
+                    "- Wijk: ", sf_A52@data$wk_naam, "<br>",
+                    "- Stadsdeel: ", sf_A52@data$std_naam)) %>%
+  addPolygons(data = sf_foc, group = "focusgebieden",
+    stroke = TRUE, color = "brown",
+    weight="1", smoothFactor = 0.3,
+    fillOpacity = 0.2, fillColor = "red",
+    highlight = highlightOptions(weight = 2, color = "black",
+                                 fillOpacity = 0.3, bringToFront = TRUE),
+    label = ~paste0(sf_foc@data$naam),
+    popup = ~paste0("<b>", "- Type: ", sf_foc@data$type, "</b>", "<br>",
+                    "<b>", "- Datum: ", "</b>", sf_foc@data$datum, "<br>")) %>%
+  addLayersControl(
+    baseGroups = c("basemap (ESRI)"),
+    overlayGroups = c("netwerk - laag", "netwerk - midden", "buurten", "focusgebieden"),
+    options = layersControlOptions(collapsed = FALSE))
+
+```
+
+A6. Stand van zaken 2050 {data-navmenu="Scenarios_OV" data-icon="fa-list"}
+=============================================  
+
+```{r section_A6, include=FALSE}
+## -------------------------------------------------------------------------- #
+## ---- Gather data --------------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+periode <- c(as.character(end_all))
+df_A6 <- df_scen01_details %>% 
+  filter(jaar %in% periode,
+         won_type == "tot") %>% 
+  group_by(scenario, jaar) %>% 
+  summarise(tot_el_won = sum(tot_el_won, na.rm = TRUE),
+            tot_el_auto = sum(tot_el_auto, na.rm = TRUE),
+            tot_el = sum(tot_el, na.rm = TRUE)) %>% 
+  ungroup()
+
+## -------------------------------------------------------------------------- #
+## create SharedData for CrossTalk ------------------------------------------ #
+## -------------------------------------------------------------------------- #
+
+```
+
+Inputs_A.6 {.sidebar}
+-----------------------------------------------------------------------
+**A6. Totaal elektriciteitsverbruik per buurt in 2050**  
+
+<font size="0.8em">
+
+NB. Alle cijfers rond energieverbruik zijn in kWh weergegeven en afgeleid van de scenariobeschrijvingen in de omgevingsvisie.
+
+**Lokale stad**
+
+* Extra woningen: 50.000  
+* Wanneer: 2040  
+* Waar: over de hele stad (naar vraag)  
+* Wat: alle type woningen (naar vraag)  
+
+**Transitiestad**
+
+* Extra woningen: 65.000  
+* Wanneer: 2050  
+* Waar: in hoogstedelijk gebied  
+* Wat: ET-proof appartementen  
+
+**Regiostad**
+
+* Extra woningen: 80.000  
+* Wanneer: 2050  
+* Waar: in focusgebieden  
+* Wat: ET-proof appartementen  
+
+</font>
+
+---
+
+
+```{r}
+
+## filter checkboxes
+# filter_checkbox("A6a", "Dossier-status", share_tbl_A61, ~DossierStatus,
+#                 inline = FALSE)
+# filter_checkbox("A6b", "Dossier-type", share_tbl_A61, ~DossierType,
+#                 inline = FALSE)
+
+```
+
+
+Row A6.1 {data-height=15%}
+-----------------------------------------------------------------------
+
+```{r prep_A61}
+## Select --------------------------------------------------------------------
+
+df_A6_nr <- df_A6 %>% 
+  select(scenario, tot_el_won, tot_el_auto)
+el_won_ls <- prettyNum(df_A6_nr$tot_el_won[df_A6_nr$scenario == "LS"], big.mark = ".", decimal.mark = ",")
+el_won_ts <- prettyNum(df_A6_nr$tot_el_won[df_A6_nr$scenario == "TS"], big.mark = ".", decimal.mark = ",")
+el_won_rs <- prettyNum(df_A6_nr$tot_el_won[df_A6_nr$scenario == "RS"], big.mark = ".", decimal.mark = ",")
+el_auto_ls <- prettyNum(round(df_A6_nr$tot_el_auto[df_A6_nr$scenario == "LS"], 
+                          digits = 0), big.mark = ".", decimal.mark = ",")
+el_auto_ts <- prettyNum(round(df_A6_nr$tot_el_auto[df_A6_nr$scenario == "TS"], 
+                          digits = 0), big.mark = ".", decimal.mark = ",")
+el_auto_rs <- prettyNum(round(df_A6_nr$tot_el_auto[df_A6_nr$scenario == "RS"], 
+                          digits = 0), big.mark = ".", decimal.mark = ",")
+
+```
+
+
+### Lokale stad | wonen: `r el_won_ls` | mob: `r el_auto_ls`
+```{r valuebox_A61a}
+## Display value -------------------------------------------------------------
+waarde <- round(df_A6$tot_el[df_A6$scenario == "LS"], digits = 0)
+sw_higher <- TRUE
+valueBox(paste0(prettyNum(waarde, big.mark = ".", decimal.mark = ","), " kWh"),
+         color = ifelse(sw_higher, "warning", "primary"))
+
+```
+
+### Transitiestad | wonen: `r el_won_ts` | mob: `r el_auto_ts`
+```{r valuebox_A61b}
+## Display value -------------------------------------------------------------
+waarde <- round(df_A6$tot_el[df_A6$scenario == "TS"], digits = 0)
+sw_higher <- TRUE
+valueBox(paste0(prettyNum(waarde, big.mark = ".", decimal.mark = ","), " kWh"),
+         color = ifelse(sw_higher, "warning", "primary"))
+
+```
+
+### Regiostad | wonen: `r el_won_rs` | mob: `r el_auto_rs`
+```{r valuebox_A61c}
+## Display value -------------------------------------------------------------
+waarde <- round(df_A6$tot_el[df_A6$scenario == "RS"], digits = 0)
+sw_higher <- TRUE
+valueBox(paste0(prettyNum(waarde, big.mark = ".", decimal.mark = ","), " kWh"),
+         color = ifelse(sw_higher, "warning", "primary"))
+
+```
+
+
+Row A6.2 {data-height=60%}
+-----------------------------------------------------------------------
+
+```{r section_A62, include=FALSE}
+## -------------------------------------------------------------------------- #
+## klaarzetten dataframes rond elektriciteitsverbruik ----------------------- #
+## -------------------------------------------------------------------------- #
+## --- Data per buurt in 2050 ----------------------------------------------- #
+sf_A62 <- sf_brt_details 
+sf_A62@data <- sf_A62@data %>% 
+  select(CBS, brt_naam, LS_tot_tot_el, TS_tot_tot_el, RS_tot_tot_el,
+         cur_tot_nr_won, LS_tot_nr_won, TS_tot_nr_won, RS_tot_nr_won) %>%
+  rename(LS_el = LS_tot_tot_el,
+         TS_el = TS_tot_tot_el,
+         RS_el = RS_tot_tot_el,
+         cur_nr = cur_tot_nr_won,
+         LS_nr = LS_tot_nr_won,
+         TS_nr = TS_tot_nr_won,
+         RS_nr = RS_tot_nr_won) %>% 
+  mutate(LS_add = LS_nr - cur_nr,
+         TS_add = TS_nr - cur_nr,
+         RS_add = RS_nr - cur_nr,
+         LS_el = ifelse(is.na(LS_el),0,LS_el),
+         TS_el = ifelse(is.na(TS_el),0,TS_el),
+         RS_el = ifelse(is.na(RS_el),0,RS_el))
+
+buurten <- c("BU05180170", "BU05184107", "BU05184209")
+df_ff <- df_scen01_details %>% 
+  filter(scenario == "LS",
+         code %in% buurten,
+         won_type == "tot",
+         jaar == "2022" | jaar == "2021")
+
+## --- Vaststellen cuts in color palette ------------------------------------ #
+# Create a function that choose a color palette and assign it to the values
+v_cuts <- c(0, 13000000, 19000000, 25000000, 31000000, 37000000, 43000000, 49000000, 120000000)
+colorbins_LS <- colorBin("YlOrRd", domain = sf_A62@data$LS_el, bins = v_cuts)
+colorbins_TS <- colorBin("YlOrRd", domain = sf_A62@data$TS_el, bins = v_cuts)
+colorbins_RS <- colorBin("YlOrRd", domain = sf_A62@data$RS_el, bins = v_cuts)
+
+```
+
+
+### Map A621: **Lokale stad**
+
+```{r Map_A621}
+# Create HTML-labels
+labels <- sprintf(
+  "<strong>%s</strong><br/>Verbruik: %s<br/>Extra won: %s",
+  sf_A62@data$brt_naam,  
+  paste0(prettyNum(round(sf_A62@data$LS_el, digits = -3), big.mark = ".", decimal.mark = ","), " kWh"),
+  prettyNum(round(sf_A62@data$LS_add, digits = 0), big.mark = ".", decimal.mark = ",")) %>%
+  lapply(htmltools::HTML)
+
+# Create map
+leaflet(sf_A62) %>%
+  addTiles() %>%
+  ## focusgebieden
+  addPolygons(data = sf_foc, group = "focusgebieden",
+    stroke = TRUE, color = "brown",
+    weight="1", smoothFactor = 0.3, fillOpacity = 0.2, fillColor = "red",
+    label = ~paste0("Focusgebied: ", sf_foc@data$naam)) %>%
+  ## congestie netwerk
+  addPolygons(data = sf_A42, group = "congestie",
+    stroke = TRUE, color = "brown",
+    weight = "1", smoothFactor = 0.3,
+    fillOpacity = 0.3, 
+    fillColor = ~ifelse(sf_A42@data$congestie == "Ja", "blue",
+                        ifelse(sf_A42@data$congestie == "Nee", "green",
+                               "lightblue")),
+    label = ~paste0("Dreigende congestie: ", sf_A42@data$congestie)) %>%
+  ## buurten elektriciteitsverbruik
+  addPolygons(data = sf_A62, group = "verbruik",
+    stroke = TRUE, color = "red",
+    weight="1", smoothFactor = 0.3, fillOpacity = 0.7,
+    fillColor = ~colorbins_LS(sf_A62@data$LS_el),
+    highlight = highlightOptions(weight = 2, color = "red",
+                                           fillOpacity = 0.3,
+                                           bringToFront = TRUE),
+    label = ~labels) %>%
+  ## layer check-marks
+  addLayersControl(
+    baseGroups = c("basemap (OSM)"),
+    overlayGroups = c("verbruik", "focusgebieden", "congestie"),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+
+```
+
+### Map A622: **Transitiestad**
+
+```{r Map_A622}
+# Create HTML-labels
+labels <- sprintf(
+  "<strong>%s</strong><br/>Verbruik: %s<br/>Extra won: %s",
+  sf_A62@data$brt_naam,  
+  paste0(prettyNum(round(sf_A62@data$TS_el, digits = -3), big.mark = ".", decimal.mark = ","), " kWh"),
+  prettyNum(round(sf_A62@data$TS_add, digits = 0), big.mark = ".", decimal.mark = ",")) %>%
+  lapply(htmltools::HTML)
+
+# Create map
+leaflet(sf_A62) %>%
+  addTiles() %>%
+  ## focusgebieden
+  addPolygons(data = sf_foc, group = "focusgebieden",
+    stroke = TRUE, color = "brown",
+    weight="1", smoothFactor = 0.3, fillOpacity = 0.2, fillColor = "red",
+    label = ~paste0("Focusgebied: ", sf_foc@data$naam)) %>%
+  ## congestie netwerk
+  addPolygons(data = sf_A42, group = "congestie",
+    stroke = TRUE, color = "brown",
+    weight = "1", smoothFactor = 0.3,
+    fillOpacity = 0.3, 
+    fillColor = ~ifelse(sf_A42@data$congestie == "Ja", "blue",
+                        ifelse(sf_A42@data$congestie == "Nee", "green",
+                               "lightblue")),
+    label = ~paste0("Dreigende congestie: ", sf_A42@data$congestie)) %>%
+  ## buurten elektriciteitsverbruik
+  addPolygons(data = sf_A62, group = "verbruik",
+              stroke = TRUE, color = "red",
+              weight="1", smoothFactor = 0.3, fillOpacity = 0.7,
+              fillColor = ~colorbins_TS(sf_A62@data$TS_el),
+              highlight = highlightOptions(weight = 2, color = "red",
+                                           fillOpacity = 0.3,
+                                           bringToFront = TRUE),
+    label = ~labels) %>%
+  ## layer check-marks
+  addLayersControl(
+    baseGroups = c("basemap (OSM)"),
+    overlayGroups = c("verbruik", "focusgebieden", "congestie"),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+
+```
+
+### Map A623: **Regiostad**
+
+```{r Map_A623}
+# Create HTML-labels
+labels <- sprintf(
+  "<strong>%s</strong><br/>Verbruik: %s<br/>Extra won: %s",
+  sf_A62@data$brt_naam,  
+  paste0(prettyNum(round(sf_A62@data$RS_el, digits = -3), big.mark = ".", decimal.mark = ","), " kWh"),
+  prettyNum(round(sf_A62@data$RS_add, digits = 0), big.mark = ".", decimal.mark = ",")) %>%
+  lapply(htmltools::HTML)
+
+# Create map
+leaflet(sf_A62) %>%
+  addTiles() %>%
+  ## focusgebieden
+  addPolygons(data = sf_foc, group = "focusgebieden",
+    stroke = TRUE, color = "brown",
+    weight="1", smoothFactor = 0.3, fillOpacity = 0.2, fillColor = "red",
+    label = ~paste0("Focusgebied: ", sf_foc@data$naam)) %>%
+  ## congestie netwerk
+  addPolygons(data = sf_A42, group = "congestie",
+    stroke = TRUE, color = "brown",
+    weight = "1", smoothFactor = 0.3,
+    fillOpacity = 0.5, 
+    fillColor = ~ifelse(sf_A42@data$congestie == "Ja", "blue",
+                        ifelse(sf_A42@data$congestie == "Nee", "green",
+                               "lightblue")),
+    label = ~paste0("Dreigende congestie: ", sf_A42@data$congestie)) %>%
+  ## buurten elektriciteitsverbruik
+  addPolygons(data = sf_A62, group = "verbruik",
+              stroke = TRUE, color = "red",
+              weight="1", smoothFactor = 0.3, fillOpacity = 0.7,
+              fillColor = ~colorbins_RS(sf_A62@data$RS_el),
+              highlight = highlightOptions(weight = 2, color = "red",
+                                           fillOpacity = 0.3,
+                                           bringToFront = TRUE),
+    label = ~labels) %>%
+  ## layer check-marks
+  addLayersControl(
+    baseGroups = c("basemap (OSM)"),
+    overlayGroups = c("verbruik", "focusgebieden", "congestie"),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+
+```
+
+Row A6.3 {data-height=25%}
+-----------------------------------------------------------------------
+
+```{r section_A63, include=FALSE}
+## -------------------------------------------------------------------------- #
+## ---- Samenstellen table met totalen per scenario (2050) ------------------ #
+## -------------------------------------------------------------------------- #
+periode = c("2050")
+df_A63 <- df_scen01_details %>% 
+  filter(as.numeric(jaar) %in% periode) %>% 
+  select(jaar, code, buurt, scenario, won_type, nr_won, nr_auto_el, nr_lp,
+         tot_el_won, tot_el_auto, tot_el) %>% 
+  filter(won_type == "tot") %>% 
+  group_by(jaar, scenario) %>% 
+  summarise(nr_won = sum(nr_won, na.rm = TRUE),
+            tot_el_won = sum(tot_el_won, na.rm = TRUE),
+            nr_auto_el = sum(nr_auto_el, na.rm = TRUE),
+            tot_el_auto = sum(tot_el_auto, na.rm = TRUE),
+            tot_el = sum(tot_el, na.rm = TRUE),
+            nr_lp = sum(nr_lp, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  select(jaar, scenario, nr_won, nr_auto_el, nr_lp, tot_el_won, tot_el_auto, tot_el)
+
+df_tbl_A63 <- df_A63 %>% 
+  rename(aantal_woningen = nr_won,
+         aantal_elektr_autos = nr_auto_el,
+         aantal_laadpalen = nr_lp,
+         kWh_woningen = tot_el_won,
+         kWh_autos = tot_el_auto,
+         kWh_totaal = tot_el) %>% 
+  pivot_longer(cols = -c(scenario, jaar), 
+               names_to = "type", values_to = "waarde") %>% 
+  pivot_wider(names_from = scenario, values_from = waarde) %>%  
+  select(-jaar) %>%
+  rename(lokaal = LS,
+         transitie = TS,
+         regio = RS) %>% 
+  select(type, lokaal, transitie, regio)
+
+```
+
+### Table A631 Lokale stad (2050)
+```{r table_A631}
+## prepare table for display
+df_tbl_A631 <- df_tbl_A63 %>% 
+  select(type, lokaal) 
+
+## display table
+NumCols <- 1:ncol(df_tbl_A631)
+
+tbl_A631 <- df_tbl_A631 %>% 
+  DT::datatable(rownames = FALSE,
+                options = list(
+                  dom = "t", 
+                  bPaginate=FALSE, scrollY = "400px",
+                  autoWidth = TRUE, paging=FALSE, 
+                  # headerCallback = JS(
+                  #               "function(thead, data, start, end, display){",
+                  #               "  $(thead).remove();",
+                  #               "}"),
+                  class = "compact",
+                  fillContainer = TRUE)) %>%
+  DT::formatStyle(columns = NumCols, 'vertical-align'='top') %>% 
+  DT::formatCurrency(2, currency = '', digits = 0, mark = ".")
+
+tbl_A631
+
+```
+
+
+### Table A632 Transitiestad (2050)
+```{r table_A632}
+## prepare table for display
+df_tbl_A632 <- df_tbl_A63 %>% 
+  select(type, transitie) 
+
+## display table
+NumCols <- 1:ncol(df_tbl_A632)
+
+tbl_A632 <- df_tbl_A632 %>% 
+  DT::datatable(rownames = FALSE,
+                options = list(
+                  dom = "t", 
+                  bPaginate=FALSE, scrollY = "400px",
+                  autoWidth = TRUE, paging=FALSE, 
+                  # headerCallback = JS(
+                  #               "function(thead, data, start, end, display){",
+                  #               "  $(thead).remove();",
+                  #               "}"),
+                  class = "compact",
+                  fillContainer = TRUE)) %>%
+  DT::formatStyle(columns = NumCols, 'vertical-align'='top') %>% 
+  DT::formatCurrency(2, currency = '', digits = 0, mark = ".")
+
+tbl_A632
+
+```
+
+
+### Table A633 Regiostad (2050)
+```{r table_A633}
+## prepare table for display
+df_tbl_A633 <- df_tbl_A63 %>% 
+  select(type, regio) 
+
+## display table
+NumCols <- 1:ncol(df_tbl_A633)
+
+tbl_A633 <- df_tbl_A633 %>% 
+  DT::datatable(rownames = FALSE,
+                options = list(
+                  dom = "t", 
+                  bPaginate=FALSE, scrollY = "400px",
+                  autoWidth = TRUE, paging=FALSE, 
+                  # headerCallback = JS(
+                  #               "function(thead, data, start, end, display){",
+                  #               "  $(thead).remove();",
+                  #               "}"),
+                  class = "compact",
+                  fillContainer = TRUE)) %>%
+  DT::formatStyle(columns = NumCols, 'vertical-align'='top') %>% 
+  DT::formatCurrency(2, currency = '', digits = 0, mark = ".")
+
+tbl_A633
+
+```
+
+
+A7. Netwerkoverbelasting 2050 {data-navmenu="Scenarios_OV" data-icon="fa-list"}
+=============================================  
+
+```{r section_A7, include=FALSE}
+## -------------------------------------------------------------------------- #
+## ---- Gather data --------------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+periode <- c(as.character(end_all))
+df_A7 <- df_scen01_details %>% 
+  filter(jaar %in% periode,
+         won_type == "tot") %>% 
+  group_by(scenario, jaar) %>% 
+  summarise(tot_el_won = sum(tot_el_won, na.rm = TRUE),
+            tot_el_auto = sum(tot_el_auto, na.rm = TRUE),
+            tot_el = sum(tot_el, na.rm = TRUE)) %>% 
+  ungroup()
+
+## -------------------------------------------------------------------------- #
+## create SharedData for CrossTalk ------------------------------------------ #
+## -------------------------------------------------------------------------- #
+
+```
+
+Inputs_A.7 {.sidebar}
+-----------------------------------------------------------------------
+**A7. Totaal elektriciteitsverbruik per buurt in 2050**  
+
+**NB. AANNAMES**
+
+In buurten waar nog **geen** transportschaarste heerst kan het elektriciteitsverbruik met **100%** toenemen
+
+In buurten waar **wel** transportschaarste dreigt kan het elektriciteitsverbruik maar met **50%** toenemen
+
+Next step: overleg met Stedin over de maximale netwerkcapaciteit per buurt in de aankomende jaren
+
+
+---
+
+
+```{r}
+
+```
+
+
+Row A7.1 {data-height=70%}
+-----------------------------------------------------------------------
+
+```{r section_A71, include=FALSE}
+## -------------------------------------------------------------------------- #
+## klaarzetten dataframes rond elektriciteitsverbruik ----------------------- #
+## -------------------------------------------------------------------------- #
+## --- Data per buurt in 2050 ----------------------------------------------- #
+## AANNAMES NETWERKCAPACITEIT ##
+max_el_con <- 1.5       ## max el.verbr. stijging = 50% in buurten met dreiging
+max_el_brt <- 2.0   ## max el.verbr. stijging = 100% in buurten zonder dreiging
+
+## Vector met kleuren voor de mate van overschrijding (mvo):
+## groen mvo =0 (geen overschrijding), steeds roder voor > 0
+# v_kleur <- c("#C5E0B4","#FF0000", "#EF0000","#DF0000","#CF0000",
+#              "#BF0000","#AF0000","#9F0000","#8F0000")
+
+v_kleur <- c("#C5E0B4","#FFD9DA", "#FFB3B5","#FF8C8F","#FF666A",
+             "#FF454A","#FF0000","#D40002","#A70002")
+
+sf_A71 <- sf_brt_details 
+df_A71 <- sf_A71@data %>% 
+  select(CBS, brt_naam, 
+         cur_tot_tot_el, LS_tot_tot_el, TS_tot_tot_el, RS_tot_tot_el,
+         congestie) %>%
+  rename(LS_el = LS_tot_tot_el,
+         TS_el = TS_tot_tot_el,
+         RS_el = RS_tot_tot_el,
+         cur_el = cur_tot_tot_el) %>% 
+  mutate(cur_el = ifelse(is.na(cur_el), 0, cur_el),
+         LS_el = ifelse(is.na(LS_el), 0, LS_el),
+         TS_el = ifelse(is.na(TS_el), 0, TS_el),
+         RS_el = ifelse(is.na(RS_el), 0, RS_el)) %>% 
+  mutate(max_el = ifelse(congestie == "Nee", cur_el * max_el_brt,
+                                cur_el * max_el_con),
+         LS_con = ifelse(LS_el > max_el, TRUE, FALSE),
+         TS_con = ifelse(TS_el > max_el, TRUE, FALSE),
+         RS_con = ifelse(RS_el > max_el, TRUE, FALSE),
+         LS_ovs = ifelse(LS_con, LS_el - max_el, 0),
+         TS_ovs = ifelse(TS_con, TS_el - max_el, 0),
+         RS_ovs = ifelse(RS_con, RS_el - max_el, 0)) %>% 
+  pivot_longer(cols = -c(CBS, brt_naam, cur_el, congestie, max_el),
+               names_to = c("scenario",".value"), names_sep = "_") %>% 
+    mutate(mvo = cut(ovs, breaks = 8, labels = c(1:8)),
+         mvo = ifelse(ovs == 0, 0, mvo),
+         kleur = v_kleur[mvo + 1])
+
+```
+
+
+### Map A721: **Lokale stad**
+
+```{r Map_A721}
+# Filter scenario data and add to shape file
+sf_A71 <- sf_brt_details 
+df_A71_2bjoined <- df_A71 %>% 
+  filter(scenario == "LS") %>% 
+  select(CBS, cur_el, max_el, el, con, ovs, kleur)
+
+sf_A71@data <- sf_A71@data %>% 
+  left_join(df_A71_2bjoined)
+
+# Create HTML-labels
+labels <- sprintf(
+  "<strong>%s</strong><br/>Maximaal: %s<br/>Overschrijding: %s",
+  sf_A71@data$brt_naam,  
+  paste0(prettyNum(round(sf_A71@data$max_el, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+  paste0(prettyNum(round(sf_A71@data$ovs, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh")) %>%
+  lapply(htmltools::HTML)
+
+# Create map
+leaflet(sf_A71) %>%
+  addTiles() %>%
+  addPolygons(data = sf_A71, group = "verbruik",
+    stroke = TRUE, color = "red",
+    weight="1", smoothFactor = 0.3, fillOpacity = 0.7,
+    fillColor = sf_A71@data$kleur,
+    highlight = highlightOptions(weight = 2, color = "red",
+                                           fillOpacity = 0.3,
+                                           bringToFront = TRUE),
+    label = ~labels)
+
+```
+
+### Map A722: **Transitiestad**
+
+```{r Map_A722}
+sf_A71 <- sf_brt_details 
+df_A71_2bjoined <- df_A71 %>% 
+  filter(scenario == "TS") %>% 
+  select(CBS, cur_el, max_el, el, con, ovs, kleur)
+
+sf_A71@data <- sf_A71@data %>% 
+  left_join(df_A71_2bjoined)
+
+# Create HTML-labels
+labels <- sprintf(
+  "<strong>%s</strong><br/>Maximaal: %s<br/>Overschrijding: %s",
+  sf_A71@data$brt_naam,  
+  paste0(prettyNum(round(sf_A71@data$max_el, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+  paste0(prettyNum(round(sf_A71@data$ovs, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh")) %>%
+  lapply(htmltools::HTML)
+
+# Create map
+leaflet(sf_A71) %>%
+  addTiles() %>%
+  addPolygons(data = sf_A71, group = "verbruik",
+    stroke = TRUE, color = "red",
+    weight="1", smoothFactor = 0.3, fillOpacity = 0.7,
+    fillColor = sf_A71@data$kleur,
+    highlight = highlightOptions(weight = 2, color = "red",
+                                           fillOpacity = 0.3,
+                                           bringToFront = TRUE),
+    label = ~labels)
+
+```
+
+### Map A723: **Regiostad**
+
+```{r Map_A723}
+sf_A71 <- sf_brt_details 
+df_A71_2bjoined <- df_A71 %>% 
+  filter(scenario == "RS") %>% 
+  select(CBS, cur_el, max_el, el, con, ovs, kleur)
+
+sf_A71@data <- sf_A71@data %>% 
+  left_join(df_A71_2bjoined)
+
+# Create HTML-labels
+labels <- sprintf(
+  "<strong>%s</strong><br/>Maximaal: %s<br/>Overschrijding: %s",
+  sf_A71@data$brt_naam,  
+  paste0(prettyNum(round(sf_A71@data$max_el, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+  paste0(prettyNum(round(sf_A71@data$ovs, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh")) %>%
+  lapply(htmltools::HTML)
+
+# Create map
+leaflet(sf_A71) %>%
+  addTiles() %>%
+  addPolygons(data = sf_A71, group = "verbruik",
+    stroke = TRUE, color = "red",
+    weight="1", smoothFactor = 0.3, fillOpacity = 0.7,
+    fillColor = sf_A71@data$kleur,
+    highlight = highlightOptions(weight = 2, color = "red",
+                                           fillOpacity = 0.3,
+                                           bringToFront = TRUE),
+    label = ~labels)
+
+```
+
+Row A7.2 {data-height=30%}
+-----------------------------------------------------------------------
+
+```{r section_A72, include=FALSE}
+## -------------------------------------------------------------------------- #
+## ---- Samenstellen table met totalen per scenario (2050) ------------------ #
+## -------------------------------------------------------------------------- #
+df_A72 <- df_A71 %>% 
+  group_by(scenario) %>% 
+  summarise(cur_el = sum(cur_el, na.rm = TRUE),
+            max_el = sum(max_el, na.rm = TRUE),
+            el = sum(el, na.rm = TRUE),
+            ovs = sum(ovs, na.rm = TRUE),
+            nr_con = sum(con, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(cur_el = paste0(prettyNum(round(cur_el, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+         max_el = paste0(prettyNum(round(max_el, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+         el =  paste0(prettyNum(round(el, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+         ovs =  paste0(prettyNum(round(ovs, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+         nr_con =  prettyNum(round(nr_con, digits = -0),
+                   big.mark = ".", decimal.mark = ",")) %>% 
+  rename(`Huidig verbruik` = cur_el,
+         `Verbruik in 2050` = el,
+         `Maximaal verbruik` = max_el,
+         `Overschrijding` = ovs,
+         `Buurten met el.gebrek` = nr_con) %>% 
+  pivot_longer(cols = -scenario, 
+               names_to = "type", values_to = "waarde")
+
+```
+
+### Table A721 Lokale stad (2050)
+```{r table_A721}
+sc_code <- "LS"
+
+## prepare table for display
+df_tbl_A721 <- df_A72 %>% 
+  filter(scenario == sc_code) %>% 
+  select(-scenario) %>% 
+  rename(`Lokale stad` = type)
+
+## display table
+NumCols <- 1:ncol(df_tbl_A721)
+
+df_tbl_A721 %>% 
+  DT::datatable(rownames = FALSE,
+                options = list(
+                  dom = "t", 
+                  bPaginate=FALSE, scrollY = "400px",
+                  autoWidth = TRUE, paging=FALSE, 
+                  class = "compact",
+                  fillContainer = TRUE)) %>%
+  DT::formatStyle(columns = NumCols, 'vertical-align'='top')
+
+```
+
+### Table A722 Transitiestad (2050)
+```{r table_A722}
+sc_code <- "TS"
+
+## prepare table for display
+df_tbl_A722 <- df_A72 %>% 
+  filter(scenario == sc_code) %>% 
+  select(-scenario) %>% 
+  rename(Transitiestad = type)
+
+## display table
+NumCols <- 1:ncol(df_tbl_A722)
+
+df_tbl_A722 %>% 
+  DT::datatable(rownames = FALSE,
+                options = list(
+                  dom = "t", 
+                  bPaginate=FALSE, scrollY = "400px",
+                  autoWidth = TRUE, paging=FALSE, 
+                  class = "compact",
+                  fillContainer = TRUE)) %>%
+  DT::formatStyle(columns = NumCols, 'vertical-align'='top')
+
+```
+
+### Table A723 Regiostad (2050)
+```{r table_A723}
+sc_code <- "RS"
+
+## prepare table for display
+df_tbl_A723 <- df_A72 %>% 
+  filter(scenario == sc_code) %>% 
+  select(-scenario) %>% 
+  rename(Regiostad = type)
+
+## display table
+NumCols <- 1:ncol(df_tbl_A723)
+
+df_tbl_A723 %>% 
+  DT::datatable(rownames = FALSE,
+                options = list(
+                  dom = "t", 
+                  bPaginate=FALSE, scrollY = "400px",
+                  autoWidth = TRUE, paging=FALSE, 
+                  class = "compact",
+                  fillContainer = TRUE)) %>%
+  DT::formatStyle(columns = NumCols, 'vertical-align'='top')
+
+```
+
+
+A8. Detail tabel 2050 {data-navmenu="Scenarios_OV" data-icon="fa-list"}
+=============================================  
+
+```{r section_A8, include=FALSE, warnings=FALSE}
+## -------------------------------------------------------------------------- #
+## ---- Gather data --------------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+df_A71_2bjoined <- df_A71 %>% 
+  select(CBS, scenario, max_el, con, ovs, mvo)
+
+sql <- "SELECT cbs, focusnaam FROM buurten"
+df_focus2bjoined <- read_sf(fpath_scen01, as_tibble = TRUE, query = sql) %>% 
+  select(cbs, focusnaam) %>% 
+  mutate(focusnaam = ifelse(focusnaam == "basis", "", focusnaam))
+
+periode <- c("2021", "2050")
+periode <- c("2050")
+type <- c("tot")
+df_tbl_A8 <- df_scen01_details %>% 
+  filter(won_type %in% type) %>% 
+  filter((jaar == "2021" & scenario == "LS") | jaar == "2050") %>% 
+  mutate(scenario = ifelse(jaar == "2021", "Nu", scenario)) %>% 
+  select(-starts_with("area"), -fct_won, -nr_auto_bs, -nr_auto_tot,
+         -won_type, -jaar) %>% 
+  left_join(df_focus2bjoined, by = c("code" = "cbs")) %>% 
+  mutate(focus = focusnaam,
+         nr_won = prettyNum(round(nr_won, digits = 0), 
+                            big.mark = ".", decimal.mark = ","),
+         gem_el_won = paste0(prettyNum(round(gem_el_won, digits = 0),
+                                       big.mark = ".", decimal.mark = ","), " kWh"),
+         tot_el_won = paste0(prettyNum(round(tot_el_won, digits = 0),
+                                       big.mark = ".", decimal.mark = ","), " kWh"),
+         nr_auto_el = prettyNum(round(nr_auto_el, digits = 0),
+                                big.mark = ".", decimal.mark = ","),
+         nr_lp = prettyNum(round(nr_lp, digits = 0),
+                           big.mark = ".", decimal.mark = ","),
+         tot_el_auto = paste0(prettyNum(round(tot_el_auto, digits = 0),
+                                        big.mark = ".", decimal.mark = ","), " kWh"),
+         tot_el = paste0(prettyNum(round(tot_el, digits = 0),
+                                   big.mark = ".", decimal.mark = ","), " kWh")) %>% 
+  mutate(warmtevisie = ifelse(warmtevisie == "wp", "warmtepomp", "warmtenet")) %>% 
+  left_join(df_A71_2bjoined, by = c("code"= "CBS", "scenario" = "scenario")) %>% 
+  mutate(max_el = prettyNum(round(max_el, digits = 0), 
+                            big.mark = ".", decimal.mark = ","),
+         con = ifelse(con, "Ja", "Nee"),
+         ovs = paste0(prettyNum(round(ovs, digits = 0),
+                                   big.mark = ".", decimal.mark = ","), " kWh")) %>% 
+  select(buurt, scenario, focus, congestie, warmtevisie,
+         nr_won, nr_auto_el, nr_lp,
+         gem_el_won, tot_el_won, tot_el_auto, tot_el, max_el, ovs, con, mvo)
+
+## -------------------------------------------------------------------------- #
+## create SharedData for CrossTalk ------------------------------------------ #
+## -------------------------------------------------------------------------- #
+# share_tbl_A8 <- SharedData$new(df_tbl_A8, key = ~type, group = "A8")
+share_tbl_A8 <- SharedData$new(df_tbl_A8, key = ~buurt, group = "A8")
+# share_tbl_A8_ix <- SharedData$new(df_tbl_A8, key = ~scenario, group = "A8")
+
+```
+
+Inputs_A.8 {.sidebar}
+-----------------------------------------------------------------------
+**A8. Tabel met details**  
+
+<font size="0.8em">
+
+Deze tabel geeft alle details weer:
+
+* scenario: LS, TS of RS. "Nu" geeft de huidige standen weer.
+* focus: naam van focusgebied als deze geldt voor de buurt
+* congestie: Of er wel of niet transportschaarste dreigt
+* warmtevisie: Buurt wordt met een warmtenet of warmtepomp voorzien
+* nr_won: aantal woningen
+* nr_auto_el: aantal elektrische auto's
+* nr_lp: aantal laadpalen
+* gem_el_won: jaargemiddeld elektr. verbruik woningen
+* tot_el_won: totaal elektr. verbruik woningen
+* tot_el_auto: totaal elektr. verbruik auto's
+* tot_el: totaal elektr. verbruik buurt
+* max_el: maximale elektr. verbruik (zie aanname boven)
+* ovs: elektr. verbruik dat boven maximum uitkomt (kan dus niet worden geleverd)
+* con: kent de buurt een elektr. verbruik dat boven maximum het uitkomt
+* mvo: mate van overschrijding van het gewenste elektr. verbruik boven het maximum
+
+
+Met onderstaand selectie-veld kan een specifieke buurt worden geselecteerd:
+
+</font>
+
+---
+
+```{r}
+# filter checkboxes
+# filter_checkbox("A8a", "Scenario", share_tbl_A8_ix, ~scenario,
+#                 inline = FALSE)
+# # filter_checkbox("A8b", "Woning-type", share_tbl_A8, ~won_type,
+# #                 inline = FALSE)
+# filter_checkbox("A8c", "Jaar", share_tbl_A8, ~jaar,
+#                 inline = FALSE)
+filter_select("A8d", "Buurt", share_tbl_A8, ~buurt)
+
+```
+
+Row A8.1 {data-height=100%}
+-----------------------------------------------------------------------
+
+```{r prep_A81}
+## Select --------------------------------------------------------------------
+
+
+```
+
+### Table A82. m.e.r. processen {data-height=100%}
+
+```{r table_A82}
+NumCols <- 1:ncol(df_tbl_A8)
+
+share_tbl_A8 %>%
+  DT::datatable(
+    filter = "none", rownames = FALSE,
+    extensions = c("Buttons"),
+    style = "bootstrap", class = "compact", width = "100%",
+    callback=JS('$("button.buttons-colvis").css("background","white");
+                 $("button.buttons-colvis").css("color","gray");
+                 $("button.buttons-pdf").css("background","white");
+                 $("button.buttons-pdf").css("color","gray");
+                 $("button.buttons-excel").css("background","white");
+                 $("button.buttons-excel").css("color","gray");
+                 return table;'),
+    colnames=c("buurt", "scenario", "focus", "congestie", "warmtevisie",
+               "# woningen", "# el.auto", "# laadpalen",
+               "jr.gem won", "tot.el. won", "tot.el auto", "tot.el",
+               "max.el", "gebrek.el", "gebrek.J/N", "gebrek.mate"),
+    options = list(dom = "Bt", deferRender = TRUE,
+                   bPaginate=FALSE, scrollY = "650px",
+                   fillContainer = TRUE, autoWidth = TRUE, paging=FALSE,
+                   headerCallback = DT::JS(
+                     "function(thead) {",
+                     "  $(thead).css('font-size', '0.7em');",
+                     "}" ),
+                   buttons = list(I("colvis"), "pdf", "excel"))) %>%
+  DT::formatStyle(columns = NumCols, fontSize = '70%') %>%
+  DT::formatStyle(columns = NumCols, 'vertical-align'='top') %>%
+  DT::formatStyle('scenario', target = 'row', color =
+                  styleEqual(c("LS", "TS", "RS"),
+                               c('steelblue', 'maroon', 'darkgreen')))
+
+```

@@ -253,3 +253,24 @@ sf_gem <- read_sf(paste0(dir_raw_pdok, "gemeente_gegeneraliseerd.geojson"))
 
 ```
 
+## Natura2000
+
+```{r}
+## read natura2000-gebieden vanuit PDOK
+
+url2get <- "https://service.pdok.nl/rvo/natura2000/wfs/v1_0?request=GetFeature&service=WFS&version=1.1.0&outputFormat=application%2Fjson%3B%20subtype%3Dgeojson&typeName=natura2000:natura2000"
+
+sf_natura2000 <- read_sf(url2get)
+write_sf(sf_natura2000, paste0(dir_raw_pdok, "natura2000.geojson"), 
+          append = FALSE)
+
+url2get <- "https://services.rce.geovoorziening.nl/landschappenkaart/wfs?request=GetFeature&service=WFS&version=1.1.0&outputFormat=application%2Fjson&typeName=landschappenkaart_nl"
+
+sf_landschappenkaart <- read_sf(url2get)
+write_sf(sf_landschappenkaart, paste0(dir_raw_pdok, "landschappenkaart.geojson"), 
+          append = FALSE)
+
+## handmatig gedownload: Groenkaart Nederland uit ALO
+
+```
+

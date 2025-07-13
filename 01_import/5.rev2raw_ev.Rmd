@@ -6,32 +6,22 @@ output: pdf_document
 ---
 
 ## Introductie
-Dit script rapporteert het inlezen van geografische gegevens rond de externe veiligheid. Hierbinnen vallen:
+Dit script rapporteert het inlezen van geografische gegevens rond de externe veiligheid. Hierbinnen vallen o.a.:
 
-* Risico bronnen / Aandachtsgebieden  
-* Kwestbare objecten  
+* Risico bronnen / Aandachtgebieden / MBA  
+* Kwestbare objecten / KGL  
 
-
-## Ruwe WFS-layers aandachtsgebieden
-
-* Bron: https://rev-portaal.nl  
-* URL:  https://rev-portaal.nl/geoserver/wfs,  
-* Format: ZIP-file  
-* Periode: 2024  
-* Gebied: Nederland  
-* Datalake: ruwe_data/REV_RegExtVeiligheid/aandachtsgebieden  
-
-## Ruwe WFS-layers kwetsbare objecten
+## Ruwe WFS-layers
 
 * Bron: https://rev-portaal.nl  
 * URL:  https://rev-portaal.nl/geoserver/wfs,  
-* Format: ZIP-file  
+* Format: geojson  
 * Periode: 2024  
 * Gebied: Nederland  
-* Datalake: ruwe_data/REV_RegExtVeiligheid/kwetsbare_objecten  
+* Datalake: ruwe_data/REV_RegExtVeiligheid  
 
 
-```{r setup, include=FALSE}
+```{r housekeeping, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
 ## -------------------------------------------------------------------------- #
@@ -76,22 +66,22 @@ dir_raw_rev <- paste0(dir_raw, "REV_RegExtVeiligheid/")
 dir.create(dir_raw_rev, showWarnings = FALSE)
 dir_raw_geo <- paste0(dir_raw, "PDOK_PublDVOpKaart/")
 
-fname_geo_gem <- "gemeente_gegeneraliseerd.geojson"
+fname_geo_gem <- "gemeente_gegeneraliseerd.geojson"  ## file with gemeentegrens
 fpath_geo_gem <- paste0(dir_raw_geo, fname_geo_gem)
 
-fname_parm <- "rev_ev.json"
+fname_parm <- "rev.json"         ## file met URL's voor het ophalen van de data
 fpath_parm <- paste0(dir_parm, fname_parm)
 
-fname_raw_cap <- "rev_cap.xml"
+fname_raw_cap <- "rev_cap.xml"                 ## file for storing capabilities
 fpath_raw_cap <- paste0(dir_raw_rev, fname_raw_cap)
 
-fname_raw_feat <- "rev_feat.zip"
+fname_raw_feat <- "rev_feat.geojson"      ## temp file for storing feature data
 fpath_raw_feat <- paste0(dir_raw_rev, fname_raw_feat)
 
-fname_raw_req <- "wfsrequest.txt"
+fname_raw_req <- "wfsrequest.txt"                ## temp file with WFS response
 fpath_raw_req <- paste0(dir_raw_rev, fname_raw_req)
 
-fname_tbl_rev <- "feature_table_rev.rds"
+fname_tbl_rev <- "feature_table_rev.rds"             ## file with feature table
 fpath_tbl_rev <- paste0(dir_raw_rev, fname_tbl_rev)
 
 ```
@@ -99,25 +89,23 @@ fpath_tbl_rev <- paste0(dir_raw_rev, fname_tbl_rev)
 
 ## Importeren
 
-### Inlezen ruwe data
-
+### Inlezen capabilities van de GeoServer REV
 De bron is de geoserver van het REV, waarin bestanden beschikbaar zijn o.b.v. 
 een specfieke URL. Die URL's zijn vastgelegd in een JSON-bestand (rev_ev.json) 
 in de parameters folder.
 
-
-```{r read, echo=FALSE, warning=FALSE}
+```{r read_cap, echo=FALSE, warning=FALSE}
+## ---- Read capabilities ---------------------------------------------------
 ## -------------------------------------------------------------------------- #
-## ----------- inlezen DATA vanuit EV-SIGNALERINGSKAART rev ----------------- #
+## ----------- inlezen DATA vanuit Reg. Ext. Veiligheid (REV) --------------- #
 ## -------------------------------------------------------------------------- #
 ## ----------- data retrieval ----------------------------------------------- #
-##  -- 1. URL's inladen vanuit parameter-file rev_ev.json  ------------------
+##  -- 1. Request URL's inladen vanuit parameter-file rev_ev.json  ---------- #
 ## -------------------------------------------------------------------------- #
 rev_codes <- read_lines(fpath_parm) %>% 
   fromJSON()
 rev_codes <- rev_codes$revdata
 url_base <- rev_codes$url_base[rev_codes$item == "features"]
-
 url_cap <- paste0(url_base,
                   rev_codes$req_gcap[rev_codes$item == "capabilities"])
 url_hits <- paste0(url_base,
@@ -126,13 +114,11 @@ url_feat <- paste0(url_base,
                   rev_codes$req_feat[rev_codes$item == "features"])
 url_names <- paste0(url_base,
                   rev_codes$req_fnms[rev_codes$item == "fieldnames"])
-
 max_pg <- rev_codes$max_pg[rev_codes$item == "capabilities"]
 
 ## Load secrets for data source --------------------------------------------- #
-#opts = curlOptions(userpwd = paste0(Sys.getenv("rev_user"),
+# opts = curlOptions(userpwd = paste0(Sys.getenv("rev_user"),
 #                                    ":", Sys.getenv("rev_password")))
-
 ## -------------------------------------------------------------------------- #
 ## -- DEEL 0: INLADEN GEMEENTEGRENZEN ---------------------------------------
 ## -------------------------------------------------------------------------- #
@@ -143,7 +129,7 @@ max_pg <- rev_codes$max_pg[rev_codes$item == "capabilities"]
 ##  We ronden af , zodat het filteren sneller kan verlopen (lijkt het) ------ #
 ## -------------------------------------------------------------------------- #
 sf_gem <- read_sf(fpath_geo_gem) %>% 
-  filter(statcode ==ohg_gmcd)
+  filter(statcode == ohg_gmcd)
 bb_gem <- st_bbox(sf_gem)
 bb_gem[["xmin"]] <- round(bb_gem[["xmin"]], 0)
 bb_gem[["ymin"]] <- round(bb_gem[["ymin"]], 0)
@@ -205,7 +191,6 @@ index <- c(1:length(lst_ftl))
 curfeat <- NA
 
 ## loop voor het vullen van het dataframe voor beschikbare FeatureTypes
-i <- 18
 for (i in seq_along(index)) {
 #  vullen standaard feature specs
   df_ftl[i,] <- NA
@@ -260,8 +245,15 @@ for (i in seq_along(index)) {
 print(df_ftl)
 write_rds(df_ftl, fpath_tbl_rev)
 
+```
+
+### Inlezen brondata van beschikbare features REV
+Alle beschikbare features van de REV Geoserver staan in df_ftl en van elke van deze features wordt de brondata ingeladen vanuit de Geoserver.
+Alle ruwe bestanden komen als geojson in de REV ruwe data folder te staan
+
+```{r read_shp, echo=FALSE, warning=FALSE}
 ## -------------------------------------------------------------------------- #
-## -- DEEL 2: INLADEN KWETSBARE OBJECTEN ------------------------------------ #
+## -- DEEL 2: INLADEN BRONDATA REV ------------------------------------------ #
 ## -------------------------------------------------------------------------- #
 ## Data inladen (alle features ophalen vanuit rev) -------------------------- #
 ## Bij KGL_module en KGL_public krijgen we: "Dienst is tijdelijk niet ------- #
@@ -269,19 +261,32 @@ write_rds(df_ftl, fpath_tbl_rev)
 ## Bij REV is het gebruik van result pages lastig, waarschijnlijk ondersteunen#
 ## ze dit uberhaupt niet ...  ----------------------------------------------- #
 ## -------------------------------------------------------------------------- #
-i <- 20
+## get rownumber in df_ftl where name contains kgl_public
+## i <- which(str_detect(df_ftl$name, "kgl_public"))
+## -------------------------------------------------------------------------- #
+if (nrow(df_ftl) == 0) {
+  stop("Geen features gevonden in REV-portaal")
+}
+
+df_ff <- df_ftl %>% 
+  filter(str_detect(name, "kgl_public"))
+df_ff$attributes
+
+i <- 1
 for (i in seq_along(df_ftl$name)) {
   nm_feat <- df_ftl$name[i]
   nr_feat <- df_ftl$nr_in_GEM[i]
   gem_key <- df_ftl$gem_key[i]
   url_start <- str_replace(url_feat, "typeName=",
                         paste0("typeName=", nm_feat))
-  nm_file <- paste0(str_split(nm_feat, ":")[[1]][2], ".shp")
-  nm_path <- paste0(dir_raw_rev, "/", nm_file)
-  url2get <- if(gem_key) paste0(url_start, req_filt) else paste0(url_start, req_bbox)
+  fn_feat <- paste0(str_split(nm_feat, ":")[[1]][2], ".geojson")
+  fp_feat <- paste0(dir_raw_rev, fn_feat)
+  url2get <- paste0(url_start, req_bbox) ## filtering lukt niet op bronhouder #
+#  url2get <- if(gem_key) paste0(url_start, req_filt) 
+#              else paste0(url_start, req_bbox)
   if (nr_feat < max_pg) {        ## check of meerdere result pages nodig zijn #
-  writeBin(getBinaryURL(url2get), fpath_raw_feat)
-  unzip(fpath_raw_feat, exdir = dir_raw_rev)
+  writeBin(getBinaryURL(url2get), fpath_raw_feat)     ## only one result page #
+  sf_feat <- read_sf(fpath_raw_feat)   
   } else {
     nr_pgs <- ceiling(nr_feat/max_pg)
     vct_pgs <- seq(from = 1, to = nr_feat, by = max_pg)
@@ -289,27 +294,23 @@ for (i in seq_along(df_ftl$name)) {
       req_start <- paste0("&startindex=", vct_pgs[j])
       url2get <- paste0(url2get, req_start, req_count)
       writeBin(getBinaryURL(url2get), fpath_raw_feat)
-      unzip(fpath_raw_feat, exdir = dir_raw_rev)
       if (j == 1) {                                        ## 1st result page #
-        sf_base <- read_sf(nm_path)
+        sf_feat <- read_sf(fpath_raw_feat)
         print(paste0(nm_feat, ": ", nrow(sf_base)))
       } else {                                ## 2nd and further result pages #
-        sf_add <- read_sf(nm_path)
-        sf_base <- bind_rows(sf_base, sf_add)
+        sf_add <- read_sf(fpath_raw_feat)
+        sf_feat <- bind_rows(sf_feat, sf_add)
         print(paste0(nm_feat, ": ", nrow(sf_add)))
       }
     }
-    file.remove(nm_path)                       ## delete temporary shape file #
-    write_sf(sf_base, nm_path, append = FALSE)
   }
-  print(paste0(nm_feat, ": ", nr_feat))
+  write_sf(sf_feat, fp_feat, append = FALSE)
+  print(paste0("nr.", i, " - ", nm_feat, ": ", nr_feat))
 }
-file.remove(fpath_raw_feat)                            ## delete the zip-file #
+file.remove(fpath_raw_feat)                    ## delete temporary shape file #
 
-write_rds(df_ftl, paste0(dir_raw_rev, "rev_features.rds"))
-
-sf_public <- read_sf(paste0(dir_raw_rev, "kgl_publicPolygon.shp")) 
-sf_module <- read_sf(paste0(dir_raw_rev, "kgl_modulePolygon.shp")) 
+sf_public <- read_sf(paste0(dir_raw_rev, "kgl_public.geojson")) 
+sf_module <- read_sf(paste0(dir_raw_rev, "kgl_module.geojson")) 
 
 ```
 
