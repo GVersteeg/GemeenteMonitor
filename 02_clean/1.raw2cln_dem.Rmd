@@ -292,11 +292,53 @@ df_dem %>%
          across(starts_with("p_"), ~ . / 100))
 
 ## -------------------------------------------------------------------------- #
+## -- CORRECTIE: Missing values for woning-types between 2004-2023 ---------- #
+## -------------------------------------------------------------------------- #
+## Only 2024 contains the distribution of woningtypes:                        # 
+##   tot, app, tus, hoek, tkap, vrij                                          #
+##        tot =  Woningvoorraad (filled for all years)                        #
+##        app =  p_Meergezinswoning (filled for 2013-2024)                    # 
+##        tus =  p_TussenwoningEenGezins (filled only 2024)                   # 
+##        hoek =  p_HoekwoningEenGezins (filled only 2024)                    # 
+##        tkap =  p_TweeOnderEenKapWoningEenGezins (filled only 2024)         # 
+##        vrij =  p_VrijstaandeWoningEenGezins (filled only 2024)             # 
+##        een =  p_Eengezinswoning (filled for 2013 - 2024)                   # 
+## -------------------------------------------------------------------------- #
+##    We are going to use a backjward fill (from new to old) for missing      #
+##    value, using tidyverse. NB grouped by: buurt arrange by jaar            # 
+## -------------------------------------------------------------------------- #
+df_dem_corr <- df_dem %>% 
+  arrange(Codering, jaar) %>% 
+  group_by(Codering) %>%
+  fill(p_Meergezinswoning, 
+       p_Eengezinswoning, 
+       p_TussenwoningEenGezins, 
+       p_HoekwoningEenGezins, 
+       p_TweeOnderEenKapWoningEenGezins, 
+       p_VrijstaandeWoningEenGezins,
+       p_Koopwoningen, p_HuurwoningenTotaal,
+       .direction = "up") %>%
+  ungroup() 
+
+df_dem_won <- df_dem %>% 
+  select(Codering, jaar,
+         Woningvoorraad,
+         p_Meergezinswoning,
+         p_Eengezinswoning,
+         p_TussenwoningEenGezins,
+         p_HoekwoningEenGezins,
+         p_TweeOnderEenKapWoningEenGezins,
+         p_VrijstaandeWoningEenGezins) %>%
+  arrange(Codering, jaar)
+
+## -------------------------------------------------------------------------- #
 ## Writing the resulting: Basis Bestand CBD Demografie                        #
+## -------------------------------------------------------------------------- #
+#fpath_cln_dem <- paste0(dir_cln_cbs, "cbs_dem_2004_2024.rds")
 ## -------------------------------------------------------------------------- #
 fname_cln_dem <- paste0("cbs_dem_", min_yr, "_", max_yr, ".rds")
 fpath_cln_dem <- paste0(dir_cln_cbs, fname_cln_dem)
-write_rds(df_dem, fpath_cln_dem)
+write_rds(df_dem_corr, fpath_cln_dem)
 
 nr_dem <- nrow(df_dem)
 nc_dem <- ncol(df_dem)

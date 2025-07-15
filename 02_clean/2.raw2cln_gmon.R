@@ -181,7 +181,7 @@ for (i in seq_along(ix_fp)) {
 ## -- Setup clean data for research WBO Woningbouw-opgave.               ----
 ## -------------------------------------------------------------------------- #
 ## -- step 1. Demografische gebiedsdata ---------------------------------------
-df_cbs <- read_rds(fpath_cln_cbs).                ## demografie per regio, jaar
+df_cbs <- read_rds(fpath_cln_cbs)                 ## demografie per regio, jaar
 
 ## -- step 1a. Elektriciteitsverbruik ----------------------------------------
 df_elc_wide <- df_cbs %>%    ## breed DF electriciteitsverbruik per woningtype
@@ -317,7 +317,7 @@ df_ewt_long <- df_elc_long %>%                  ## combine gas en electriciteit
 write_rds(df_ewt_long, file = fpath_cln_ewt)
 
 ## -- step 2b. Write Aantallen woningen per woningtype ------------------------
-write_rds(df_wtb, file = fpath_cln_wtb)
+write_rds(df_won_long, file = fpath_cln_wtb)
 
 ## -- step 2c. Combine & Write wide dataframes --------------------------------
 df_tot_wide <- df_elc_wide %>% 
