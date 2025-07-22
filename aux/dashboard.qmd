@@ -1,0 +1,102 @@
+---
+title: "Test"
+format: dashboard
+---
+
+```{r housekeeping}
+library(tidyverse)
+library(plotly)
+library(reactable)
+library(bslib)
+library(bsicons)
+library(shiny)
+
+if(!require(pacman)) install.packages("pacman")
+    pacman::p_load(tidyverse,
+    plotly, 
+    reactable,
+    bslib, 
+    bsicons, 
+    shiny)
+
+?value_box
+
+
+```
+
+
+
+# page1
+
+## col_side {.sidebar}
+Explanation
+
+
+## col_main
+
+### Upper
+
+```{r}
+
+value_box(
+  title = "Customer lifetime value",
+  value = "$5,000",
+  showcase = bsicons::bs_icon("globe2"),
+  theme = "primary"
+)
+
+value_box(
+  title = "Customer lifetime value",
+  value = "$5,000",
+  showcase = bsicons::bs_icon("bank2"),
+  theme = "teal"
+)
+
+value_box(
+  title = "Customer lifetime value",
+  value = "$5,000",
+  showcase = bsicons::bs_icon("bank2"),
+  theme = "bg-success"
+)
+
+```
+
+
+
+### Row1 {.tabset}
+
+#### sub1
+```{r}
+#| title: Test-titel
+
+p <- ggplot(cars, aes(speed, dist)) +
+    geom_point()
+ggplotly(p)
+
+```
+
+#### sub2
+```{r}
+reactable(iris)
+
+```
+
+### Row2
+Rij 2
+
+```{r}
+plot(cars)
+
+```
+
+
+# page2
+
+
+
+```{r}
+plot(iris)
+
+```
+
+

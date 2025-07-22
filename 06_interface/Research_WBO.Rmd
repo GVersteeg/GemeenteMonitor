@@ -9,6 +9,7 @@ output:
 ---
 
 ```{r housekeeping, include=FALSE}
+#| label: housekeeping
 
 ## show current version of R
 cat("R version: ", R.version$version.string, "\n")
@@ -51,10 +52,10 @@ library(shiny)
 library(leaflet)
 library(htmltools)
 library(crosstalk)
-library(summarywidget)
+#library(summarywidget)
 library(zoo)
-# library(rsconnect)
-# library(pins)
+library(rsconnect)
+library(pins)
 
 ## -------------------------------------------------------------------------- #
 ## ------------------------ fresh slate ---------------------------------------
@@ -202,6 +203,8 @@ df_scen01_in <- sf_brt_cur %>%
 ```
 
 ```{r prep_scenarios, include=FALSE}
+#| label: prepare scenarios
+
 ## -------------------------------------------------------------------------- #
 ## Scenario 1: Energiebehoefte versus woningbouw-scenario's ----------------- #
 ## -------------------------------------------------------------------------- #
@@ -317,7 +320,7 @@ df_ab_past_jr <- df_ab_past_brt %>%
             nr_auto_tot = sum(nr_auto_tot, na.rm = TRUE))
 
 ## -------------------------------------------------------------------------- #
-## ---- setup dataframe for elektrische auto's 2010-2050 -------------------- #
+## ---- setup dataframe for elektrische auto's 2004-2050 -------------------- #
 ## www.rvo.nl/sites/default/files/2021/10/TrendrapportNederlandse-markt-personenautos-2021.pdf
 ## www.pwc.nl/nl/assets/documents/pwc-onderzoek-elektrisch-rijden.pdf
 ## nederlandelektrisch.nl/actueel/verkoopcijfers
@@ -332,29 +335,35 @@ df_ab_prep_nl <- data.frame(jaar = character(),
                        nr_tot = numeric(),
                        nr_lp = numeric(),
                        stringsAsFactors = FALSE)
-df_ab_prep_nl[1,] <- c("2010", "Nederland", "EPOL", NA,   30500,  NA, 10000)
-df_ab_prep_nl[2,] <- c("2011", "Nederland", "EPOL", NA,   43000,  NA, 16000)
-df_ab_prep_nl[3,] <- c("2012", "Nederland", "EPOL", NA,   55500,  NA, 26000)
-df_ab_prep_nl[4,] <- c("2013", "Nederland", "EPOL", NA,   68000,  NA, 36000)
-df_ab_prep_nl[5,] <- c("2014", "Nederland", "EPOL", NA,   80500,  NA, 48000)
-df_ab_prep_nl[6,] <- c("2015", "Nederland", "EPOL", NA,   93000,  NA, 60000)
-df_ab_prep_nl[7,] <- c("2016", "Nederland", "EPOL", NA,  105500,  NA, 72000)
-df_ab_prep_nl[8,] <- c("2017", "Nederland", "NLE", NA,  118000,  NA, 90000)
-df_ab_prep_nl[9,] <- c("2018", "Nederland", "NLE", NA,  138000,  NA, 100000)
-df_ab_prep_nl[10,] <- c("2019", "Nederland", "NLE", NA,  197000,  NA, 137000)
-df_ab_prep_nl[11,] <- c("2020", "Nederland", "NLE", NA,  271000,  NA, 177000)
-df_ab_prep_nl[12,] <- c("2021", "Nederland", "PWC, NLE", 8400000,  382000,  8800000,  230000)
-df_ab_prep_nl[13,] <- c("2030", "Nederland", "PWC", 7500000, 1900000,  9400000, 1700000)
-df_ab_prep_nl[14,] <- c("2040", "Nederland", "PWC", 4100000, 5900000, 10000000, 3200000)
-df_ab_prep_nl[15,] <- c("2050", "Nederland", "PWC",  700000, 9900000, 10600000, 4800000)
+df_ab_prep_nl[1,] <- c("2004", "Nederland", "EPOL", NA,   1000,  NA, 300)
+df_ab_prep_nl[2,] <- c("2005", "Nederland", "EPOL", NA,   2000,  NA, 600)
+df_ab_prep_nl[3,] <- c("2006", "Nederland", "EPOL", NA,   5000,  NA, 1500)
+df_ab_prep_nl[4,] <- c("2007", "Nederland", "EPOL", NA,   9000,  NA, 2500)
+df_ab_prep_nl[5,] <- c("2008", "Nederland", "EPOL", NA,   14000,  NA, 4500)
+df_ab_prep_nl[6,] <- c("2009", "Nederland", "EPOL", NA,   23000,  NA, 7000)
+df_ab_prep_nl[7,] <- c("2010", "Nederland", "EPOL", NA,   30500,  NA, 10000)
+df_ab_prep_nl[8,] <- c("2011", "Nederland", "EPOL", NA,   43000,  NA, 16000)
+df_ab_prep_nl[9,] <- c("2012", "Nederland", "EPOL", NA,   55500,  NA, 26000)
+df_ab_prep_nl[10,] <- c("2013", "Nederland", "EPOL", NA,   68000,  NA, 36000)
+df_ab_prep_nl[11,] <- c("2014", "Nederland", "EPOL", NA,   80500,  NA, 48000)
+df_ab_prep_nl[12,] <- c("2015", "Nederland", "EPOL", NA,   93000,  NA, 60000)
+df_ab_prep_nl[13,] <- c("2016", "Nederland", "EPOL", NA,  105500,  NA, 72000)
+df_ab_prep_nl[14,] <- c("2017", "Nederland", "NLE", NA,  118000,  NA, 90000)
+df_ab_prep_nl[15,] <- c("2018", "Nederland", "NLE", NA,  138000,  NA, 100000)
+df_ab_prep_nl[16,] <- c("2019", "Nederland", "NLE", NA,  197000,  NA, 137000)
+df_ab_prep_nl[17,] <- c("2020", "Nederland", "NLE", NA,  271000,  NA, 177000)
+df_ab_prep_nl[18,] <- c("2021", "Nederland", "PWC, NLE", 8400000,  382000,  8800000,  230000)
+df_ab_prep_nl[19,] <- c("2030", "Nederland", "PWC", 7500000, 1900000,  9400000, 1700000)
+df_ab_prep_nl[20,] <- c("2040", "Nederland", "PWC", 4100000, 5900000, 10000000, 3200000)
+df_ab_prep_nl[21,] <- c("2050", "Nederland", "PWC",  700000, 9900000, 10600000, 4800000)
 
-## ---- completeren dataframe for elektrische auto's 2010-2050 -------------- #
+## ---- completeren dataframe for elektrische auto's 2004-2050 -------------- #
 ##--  zoo:complete -> add missing rows based on jaar 
 ##--  zoo:na.approx -> liniar interpolation of values
 df_ab_all_nl <- df_ab_prep_nl %>% 
   mutate(across(starts_with("nr_"), as.numeric),
          jaar = as.numeric(jaar)) %>% 
-  tidyr::complete(jaar = 2010:2050) %>%
+  tidyr::complete(jaar = 2004:2050) %>%
   mutate(regio = "Nederland", bron = "IPOL",
          nr_bs = round(na.approx(nr_bs, na.rm = FALSE), -3),
          nr_el = round(na.approx(nr_el, na.rm = FALSE), -3),
@@ -385,7 +394,7 @@ for (i in seq_along(jrn_pre)) {
 }
 
 ## -------------------------------------------------------------------------- #
-## -- add data for autobezit (elektrische auto's) 2010-2050 in df_scen01 ---- #
+## -- add data for autobezit (elektrische auto's) 2004-2050 in df_scen01 ---- #
 ## --   won_type 'totaal' remains (it is used to create rows for won_type     #
 ## --   'beng' later on in the script).                                       #
 ## --   We need to distribute the past/future autobezit-data from gemeente    #
@@ -1009,6 +1018,8 @@ A1. Basis op Orde {data-navmenu="Scenarios_OV" data-icon="fa-list"}
 =============================================  
 
 ```{r section_A1, include=FALSE}
+#| label: R-code prep A1
+
 ## -------------------------------------------------------------------------- #
 ## ---- Determine most recent year of measured data ------------------------- #
 ## -------------------------------------------------------------------------- #
@@ -1035,6 +1046,8 @@ Row A1.1 {data-height=50%}
 ### Map A11. Basis op orde
 
 ```{r map_A11, fig.width=20}
+#| label: R-code map A11
+
 # Define cut points for the colorbins
 # cuts_no2 <- c(0, 10, 15, 20, 25, 30, 35, 40)
 # pal_no2 <- colorBin(palette = "Blues",
@@ -1088,6 +1101,8 @@ A2. Stand van zaken 2024 {data-navmenu="Scenarios_OV" data-icon="fa-list"}
 =============================================  
 
 ```{r section_A2, include=FALSE}
+#| label: R-code prep A2
+
 ## -------------------------------------------------------------------------- #
 ## ---- Gather data --------------------------------------------------------- #
 ## -------------------------------------------------------------------------- #
@@ -1140,16 +1155,12 @@ NB. Alle cijfers rond energieverbruik zijn in kWh
 
 ---
 
-
-```{r}
-
-```
-
-
 Row A2.1 {data-height=15%}
 -----------------------------------------------------------------------
 
 ```{r prep_A21}
+#| label: R-code prep A21
+
 ## Select --------------------------------------------------------------------
 df_A21_tot <- df_A2 %>% 
   select(jaar, won_type, tot_el_won, tot_el_auto, tot_el, nr_won) %>%
@@ -1175,7 +1186,9 @@ nr_ela <- prettyNum(round(df_A2_nr$nr_auto_el[df_A2_nr$won_type == "tot"],
 
 
 ### El.verbruik `r nr_won` woningen
-```{r valuebox_A21}
+```{r valuebox_A21a}
+#| label: R-code vb A21a
+
 ## Display value -------------------------------------------------------------
 waarde <- round(df_A21_tot$tot_el_won[2], digits = 0)
 sw_higher <- waarde > df_A21_tot$tot_el_won[1]
@@ -1185,7 +1198,9 @@ valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
 ```
 
 ### El.verbruik `r nr_ela` autos
-```{r valuebox_A21a}
+```{r valuebox_A21b}
+#| label: R-code vb A21b
+
 ## Display value -------------------------------------------------------------
 waarde <- round(df_A21_tot$tot_el_auto[2], digits = 0)
 sw_higher <- waarde > df_A21_tot$tot_el_auto[1]
@@ -1195,7 +1210,9 @@ valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
 ```
 
 ### El.verbruik totaal Gemeente
-```{r valuebox_A21b}
+```{r valuebox_A21c}
+#| label: R-code vb A21c
+
 ## Display value -------------------------------------------------------------
 waarde <- round(df_A21_tot$tot_el[2], digits = 0)
 sw_higher <- waarde > df_A21_tot$tot_el[1]
@@ -1205,7 +1222,9 @@ valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
 ```
 
 ### Gem.ev `r nr_won` Woningen
-```{r valuebox_A21c}
+```{r valuebox_A21d}
+#| label: R-code vb A21d
+
 ## Select --------------------------------------------------------------------
 v_waarde <- df_A21_gem %>%
   filter(won_type == "tot") %>% 
@@ -1219,7 +1238,9 @@ valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
 ```
 
 ### Gem.ev `r nr_app` Appartementen
-```{r valuebox_A21d}
+```{r valuebox_A21e}
+#| label: R-code vb A21e
+
 ## Select --------------------------------------------------------------------
 v_waarde <- df_A21_gem %>%
   filter(won_type == "app") %>% 
@@ -1233,7 +1254,9 @@ valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
 ```
 
 ### Gem.ev `r nr_tsw` Tussenwoningen
-```{r valuebox_A21e}
+```{r valuebox_A21f}
+#| label: R-code vb A21f
+
 ## Select --------------------------------------------------------------------
 v_waarde <- df_A21_gem %>%
   filter(won_type == "tsw") %>% 
@@ -1247,7 +1270,9 @@ valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
 ```
 
 ### Gem.ev `r nr_hkw` Hoekwoningen
-```{r valuebox_A21f}
+```{r valuebox_A21g}
+#| label: R-code vb A21g
+
 ## Select --------------------------------------------------------------------
 v_waarde <- df_A21_gem %>%
   filter(won_type == "hkw") %>% 
@@ -1261,7 +1286,9 @@ valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
 ```
 
 ### Gem.ev `r nr_twk` Tweekappers
-```{r valuebox_A21g}
+```{r valuebox_A21h}
+#| label: R-code vb A21h
+
 ## Select --------------------------------------------------------------------
 v_waarde <- df_A21_gem %>%
   filter(won_type == "twk") %>% 
@@ -1275,7 +1302,9 @@ valueBox(prettyNum(waarde, big.mark = ".", decimal.mark = ","),
 ```
 
 ### Gem.ev `r nr_vst` Vrijstaand
-```{r valuebox_A21h}
+```{r valuebox_A21i}
+#| label: R-code vb A21i
+
 ## Select --------------------------------------------------------------------
 v_waarde <- df_A21_gem %>%
   filter(won_type == "vst") %>% 
@@ -1293,6 +1322,8 @@ Row A2.2 {data-height=85%}
 -----------------------------------------------------------------------
 
 ```{r section_A22, include=FALSE}
+#| label: R-code prep A22
+
 ## -------------------------------------------------------------------------- #
 ## klaarzetten dataframes rond elektriciteitsverbruik ----------------------- #
 ## -------------------------------------------------------------------------- #
@@ -1326,6 +1357,8 @@ df_A22 <- df_scen01_details %>%
 ### Map A221: Jaargemiddeld elektriciteitsverbruik per buurt
 
 ```{r Map_A221}
+#| label: R-code map A221
+
 # Create a function that choose a color palette and assign it to the values
 pal <- colorNumeric(
   palette = "YlOrRd",
@@ -1351,6 +1384,8 @@ leaflet(sf_A22) %>%
 ### Map A222: Totaal elektriciteitsverbruik per buurt
 
 ```{r Map_A222}
+#| label: R-code map A222
+
 pal <- colorNumeric(
   palette = "YlOrRd",
   domain = sf_A22$tot_el_won)
@@ -1376,6 +1411,7 @@ leaflet(sf_A22) %>%
 ### Plot A223 Elektriciteitsverbruiken 2004-2024
 
 ```{r plot_A223, echo = FALSE, warning = FALSE, message = FALSE}
+#| label: R-code plot A223
 
 ## New facet label names for e_type variable
 supp.labs <- c("Gem.EV woningen", "Tot.EV woningen", "Tot.EV autos")
@@ -1395,6 +1431,7 @@ A3. Scenario verbruik {data-orientation=columns data-navmenu="Scenarios_OV" data
 =============================================  
 
 ```{r section_A3, include=FALSE}
+#| label: R-code prep A3
 
 ## -------------------------------------------------------------------------- #
 ## ---- Samenstellen table met totalen per scenario (2024 & 2040) ----------- #
@@ -1486,6 +1523,7 @@ Het CBS geeft aan dat het gemiddeld autobezit per huishouden in de Randstad **0.
 Alle nieuwe te bouwen woningen zijn "bijna energieneutrale woningen" (BENG-woning). Hieronder is een tabel weergegeven met het aangenomen jaargemiddeld elektr.verbruik per woningtype, rekening houdend met het type warmtevoorziening vanuit de warmtevisie.
 
 ```{r table_A31}
+#| label: R-code tbl A3a
 
 NumCols <- 1:ncol(df_tbl_A31)
 
@@ -1509,6 +1547,8 @@ df_tbl_A31 %>%
 ---
 
 ```{r}
+#| label: R-code filter A3b
+
 filter_checkbox("A3", "Type meting", share_tbl_A32, ~type,
                  inline = FALSE)
 
@@ -1518,8 +1558,10 @@ filter_checkbox("A3", "Type meting", share_tbl_A32, ~type,
 Column A3.1 {data-width=60%}
 -----------------------------------------------------------------------
 
-### Table A32 Overzichtstabel scenarios (2024 versus 2040)
-```{r table_A32}
+### Table A31 Overzichtstabel scenarios (2024 versus 2040)
+```{r table_A31}
+#| label: R-code tbl A31
+
 ## prepare table for display
 
 ## display table
@@ -1552,6 +1594,7 @@ Column A3.2 {data-width=40%}
 ### Plot A32a. Scenario: Ruimt. Ontw.strategie 100% (+4k5 woningen, diverse types)
 
 ```{r plot_A32a, echo = FALSE, warning = FALSE, message = FALSE}
+#| label: R-code plot A32a
 
 ## transform df_scen01_details to fit plot ---------------------------------- #
 df_plot_A32 <- df_scen01_details %>% 
@@ -1580,7 +1623,8 @@ ggplot(df_plot_A32[df_plot_A32$scenario == "S100",],
 
 ### Plot A32b. Scenario: Ruimt. Ontw.strategie 100% (+6k woningen, appartementen)
 
-```{r plot_D32b, echo = FALSE, warning = FALSE, message = FALSE}
+```{r plot_A32b, echo = FALSE, warning = FALSE, message = FALSE}
+#| label: R-code plot A32b
 
 ## select and display ------------------------------------------------------- #
 ggplot(df_plot_A32[df_plot_A32$scenario == "S130",],
@@ -1612,6 +1656,8 @@ De afbeeldingen hiernaast zijn afgeleid van de Capaciteitskaart Netbeheer Nederl
 Legenda afbeeldingen links:
 
 ```{r picture_A42, echo = F, out.width = '100%'}
+#| label: R-code side A4a
+
 knitr::include_graphics(paste0(dir_cln_pic, "/Legenda_ES.png"))
 
 ```
@@ -1623,14 +1669,13 @@ Op de kaart rechts wordt getoond in welke buurten in Den Haag de transportschaar
 Legenda kaart rechts:
 
 ```{r picture_A43, echo = F, out.width = '100%'}
+#| label: R-code side A4b
+
 knitr::include_graphics(paste0(dir_cln_pic, "/Legenda_ESbrt.png"))
 
 ```
 
-
 </font>
-
-
 
 ---
 
@@ -1639,12 +1684,16 @@ Column A4.1 {data-width=30%}
 ### Pic A41a. Electriciteitsschaarste Nederland
 
 ```{r picture_A41a, echo = F, out.width = '100%'}
+#| label: R-code pic A41a
+
 knitr::include_graphics(paste0(dir_cln_pic, "/El_schaarste_NL.png"))
 ```
 
 ### Pic A41b. Electriciteitsschaarste Gemeente
 
 ```{r picture_A41b, echo = F, out.width = '100%'}
+#| label: R-code pic A41b
+
 knitr::include_graphics(paste0(dir_cln_pic, "/El_schaarste_Gem.png"))
 ```
 
@@ -1655,6 +1704,8 @@ Column A4.2 {data-width=70%}
 ### Map A42. Buurten met en zonder transportschaarste
 
 ```{r map_A42}
+#| label: R-code map A42
+
 ## make shape file specific to this map
 sf_A42 <- sf_brt_details
 sf_A42 <- sf_A42 %>% 
@@ -1698,6 +1749,7 @@ A5. Elektriciteitsnetwerk {data-orientation=columns data-navmenu="Scenarios_OV" 
 =============================================  
 
 ```{r section_A5, include=FALSE}
+#| label: R-code prep A5
 
 ## -------------------------------------------------------------------------- #
 ## ---- Bepalen van de contour rond de buurten die congestie hebben --------- #
@@ -1743,6 +1795,8 @@ De kaart hiernaast laat het elektriciteitsnetwerk zien op de achtergrond van de 
 Legenda
 
 ```{r picture_A52, echo = F, out.width = '100%'}
+#| label: R-code side A52
+
 knitr::include_graphics(paste0(dir_cln_pic, "/Legenda_EVbd.png"))
 ```
 
@@ -1758,6 +1812,8 @@ Column A5.2
 ### Map A52. Overzicht elektriciteitsnetwerk met en zonder transportschaarste
 
 ```{r map_A52}
+#| label: R-code map A52
+
 ## make shape file specific to this map
 sf_A52 <- sf_brt_details
 sf_A52 <- sf_A52 %>% 
@@ -1817,6 +1873,8 @@ A6. Stand van zaken 2040 {data-navmenu="Scenarios_OV" data-icon="fa-list"}
 =============================================  
 
 ```{r section_A6, include=FALSE}
+#| label: R-code prep A6
+
 ## -------------------------------------------------------------------------- #
 ## ---- Gather data --------------------------------------------------------- #
 ## -------------------------------------------------------------------------- #
@@ -1865,6 +1923,7 @@ NB. Alle cijfers rond energieverbruik zijn in kWh weergegeven en afgeleid van de
 
 
 ```{r}
+#| label: R-code side A6
 
 ## filter checkboxes
 # filter_checkbox("A6a", "Dossier-status", share_tbl_A61, ~DossierStatus,
@@ -1879,8 +1938,9 @@ Row A6.1 {data-height=15%}
 -----------------------------------------------------------------------
 
 ```{r prep_A61}
-## Select --------------------------------------------------------------------
+#| label: R-code prep A61
 
+## Select --------------------------------------------------------------------
 df_A6_nr <- df_A6 %>% 
   select(scenario, tot_el_won, tot_el_auto)
 el_won_S100 <- prettyNum(df_A6_nr$tot_el_won[df_A6_nr$scenario == "S100"], big.mark = ".", decimal.mark = ",")
@@ -1896,6 +1956,8 @@ el_auto_S130 <- prettyNum(round(df_A6_nr$tot_el_auto[df_A6_nr$scenario == "S130"
 ### Ruimt.Ontw.Strategie 100% | wonen: `r el_won_S100` | mob: `r el_auto_S100`
 
 ```{r valuebox_A61a}
+#| label: R-code vb A61a
+
 ## Display value -------------------------------------------------------------
 waarde <- round(df_A6$tot_el[df_A6$scenario == "S100"], digits = 0)
 sw_higher <- TRUE
@@ -1906,6 +1968,8 @@ valueBox(paste0(prettyNum(waarde, big.mark = ".", decimal.mark = ","), " kWh"),
 
 ### Ruimt.Ontw.Strategie 130% | wonen: `r el_won_S130` | mob: `r el_auto_S130`
 ```{r valuebox_A61b}
+#| label: R-code vb A61b
+
 ## Display value -------------------------------------------------------------
 waarde <- round(df_A6$tot_el[df_A6$scenario == "S130"], digits = 0)
 sw_higher <- TRUE
@@ -1919,6 +1983,8 @@ Row A6.2 {data-height=55%}
 -----------------------------------------------------------------------
 
 ```{r section_A62, include=FALSE}
+#| label: R-code prep A62
+
 ## -------------------------------------------------------------------------- #
 ## klaarzetten dataframes rond elektriciteitsverbruik ----------------------- #
 ## -------------------------------------------------------------------------- #
@@ -1949,6 +2015,8 @@ colorbins_S130 <- colorBin("YlOrRd", domain = sf_A62$S130_el, bins = v_cuts)
 ### Map A621: **Ruimtelijke Ontw.Strategie (100%)**
 
 ```{r Map_A621}
+#| label: R-code map A621
+
 # Create HTML-labels
 labels <- sprintf(
   "<strong>%s</strong><br/>Verbruik: %s<br/>Extra won: %s",
@@ -1995,6 +2063,8 @@ leaflet(sf_A62) %>%
 ### Map A622: **Ruimtelijke Ontw.Strategie (130%)**
 
 ```{r Map_A622}
+#| label: R-code map A622
+
 # Create HTML-labels
 labels <- sprintf(
   "<strong>%s</strong><br/>Verbruik: %s<br/>Extra won: %s",
@@ -2043,6 +2113,8 @@ Row A6.3 {data-height=30%}
 -----------------------------------------------------------------------
 
 ```{r section_A63, include=FALSE}
+#| label: R-code prep A63
+
 ## -------------------------------------------------------------------------- #
 ## ---- Samenstellen table met totalen per scenario (2040) ------------------ #
 ## -------------------------------------------------------------------------- #
@@ -2081,6 +2153,8 @@ df_tbl_A63 <- df_A63 %>%
 
 ### Table A631 **Ruimtelijke Ontw.Strategie (100%)**
 ```{r table_A631}
+#| label: R-code tbl A631
+
 ## prepare table for display
 df_tbl_A631 <- df_tbl_A63 %>% 
   select(type, S100) 
@@ -2110,6 +2184,8 @@ tbl_A631
 
 ### Table A632 **Ruimtelijke Ontw.Strategie (130%)**
 ```{r table_A632}
+#| label: R-code tbl A632
+
 ## prepare table for display
 df_tbl_A632 <- df_tbl_A63 %>% 
   select(type, S130) 
@@ -2141,6 +2217,8 @@ A7. Netwerkoverbelasting 2040 {data-navmenu="Scenarios_OV" data-icon="fa-list"}
 =============================================  
 
 ```{r section_A7, include=FALSE}
+#| label: R-code prep A7
+
 ## -------------------------------------------------------------------------- #
 ## ---- Gather data --------------------------------------------------------- #
 ## -------------------------------------------------------------------------- #
@@ -2177,6 +2255,8 @@ Next step: overleg met Enexis over de maximale netwerkcapaciteit per buurt in de
 
 
 ```{r}
+#| label: R-code side A7
+
 
 ```
 
@@ -2185,6 +2265,8 @@ Row A7.1 {data-height=70%}
 -----------------------------------------------------------------------
 
 ```{r section_A71, include=FALSE}
+#| label: R-code prep A71
+
 ## -------------------------------------------------------------------------- #
 ## klaarzetten dataframes rond elektriciteitsverbruik ----------------------- #
 ## -------------------------------------------------------------------------- #
@@ -2230,6 +2312,8 @@ df_A71 <- sf_A71 %>%
 ### Map A721: **Ruimtelijke ontwikkelstrategie (100%)**
 
 ```{r Map_A721}
+#| label: R-code map A721
+
 # Filter scenario data and add to shape file
 sf_A71 <- sf_brt_details 
 df_A71_2bjoined <- df_A71 %>% 
@@ -2266,6 +2350,8 @@ leaflet(sf_A71) %>%
 ### Map A722: **Ruimtelijke ontwikkelstrategie (130%) **
 
 ```{r Map_A722}
+#| label: R-code map A722
+
 sf_A71 <- sf_brt_details 
 df_A71_2bjoined <- df_A71 %>% 
   filter(scenario == "S130") %>% 
@@ -2303,6 +2389,8 @@ Row A7.2 {data-height=30%}
 -----------------------------------------------------------------------
 
 ```{r section_A72, include=FALSE}
+#| label: R-code prep A72
+
 ## -------------------------------------------------------------------------- #
 ## ---- Samenstellen table met totalen per scenario (2040) ------------------ #
 ## -------------------------------------------------------------------------- #
@@ -2336,6 +2424,8 @@ df_A72 <- df_A71 %>%
 
 ### Table A721 Ruimtelijke ontw.strategie (100%)
 ```{r table_A721}
+#| label: R-code tbl A721
+
 sc_code <- "S100"
 
 ## prepare table for display
@@ -2361,6 +2451,8 @@ df_tbl_A721 %>%
 
 ### Table A722 Ruimtelijke ontw.strategie (130%)
 ```{r table_A722}
+#| label: R-code tbl A722
+
 sc_code <- "S130"
 
 ## prepare table for display
@@ -2389,6 +2481,8 @@ A8. Detail tabel 2040 {data-navmenu="Scenarios_OV" data-icon="fa-list"}
 =============================================  
 
 ```{r section_A8, include=FALSE, warnings=FALSE}
+#| label: R-code prep A8
+
 ## -------------------------------------------------------------------------- #
 ## ---- Gather data --------------------------------------------------------- #
 ## -------------------------------------------------------------------------- #
@@ -2475,6 +2569,8 @@ Met onderstaand selectie-veld kan een specifieke buurt worden geselecteerd:
 ---
 
 ```{r}
+#| label: R-code side A8
+
 # filter checkboxes
 # filter_checkbox("A8a", "Scenario", share_tbl_A8_ix, ~scenario,
 #                 inline = FALSE)
@@ -2490,6 +2586,8 @@ Row A8.1 {data-height=100%}
 -----------------------------------------------------------------------
 
 ```{r prep_A81}
+#| label: R-code prep A81
+
 ## Select --------------------------------------------------------------------
 
 
@@ -2498,6 +2596,8 @@ Row A8.1 {data-height=100%}
 ### Table A82. Ruimtelijke Ontw.Strategie per buurt {data-height=100%}
 
 ```{r table_A82}
+#| label: R-code tbl A82
+
 NumCols <- 1:ncol(df_tbl_A8)
 
 share_tbl_A8 %>%
