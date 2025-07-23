@@ -195,7 +195,12 @@ df_elc_wide <- df_cbs %>%    ## breed DF electriciteitsverbruik per woningtype
          tkap_ev = TweeOnderEenKapWoning_EV,
          vrij_ev = VrijstaandeWoning_EV,
          koop_ev = EigenWoning_EV,
-         huur_ev = Huurwoning_EV)
+         huur_ev = Huurwoning_EV) %>% 
+  arrange(Codering, jaar) %>%             ## fill missing values (down then up)
+  group_by(Codering) %>%
+  fill(tot_ev, app_ev, tus_ev, hoek_ev, tkap_ev, vrij_ev, koop_ev, huur_ev,
+       .direction = "downup") %>%
+  ungroup() 
 
 df_elc_long <- df_cbs %>%       ## lang DF elektr.verbruik per woningtype/buurt
   filter(SoortRegio == "Buurt") %>%
@@ -213,7 +218,12 @@ df_elc_long <- df_cbs %>%       ## lang DF elektr.verbruik per woningtype/buurt
   left_join(df_lut[,c(5:6)], by = c("code" = "BU_CODE")) %>%
   rename(buurt = BU_NAAM) %>%
   mutate(verbr_type = "el") %>% 
-  select(buurt, code, jaar, verbr_type, everything())
+  select(buurt, code, jaar, verbr_type, everything()) %>% 
+  arrange(code, jaar) %>%                 ## fill missing values (down then up)
+  group_by(code) %>%
+  fill(tot, app, tus, hoek, tkap, vrij, koop, huur,
+       .direction = "downup") %>%
+  ungroup() 
 
 ## -- step 1b. Aardgasverbruik ------------------------------------------------
 df_gas_wide <- df_cbs %>%            ## breed DF aardgasverbruik per woningtype
@@ -227,7 +237,12 @@ df_gas_wide <- df_cbs %>%            ## breed DF aardgasverbruik per woningtype
          tkap_gv = TweeOnderEenKapWoning_GV,
          vrij_gv = VrijstaandeWoning_GV,
          koop_gv = EigenWoning_GV,
-         huur_gv = Huurwoning_GV)
+         huur_gv = Huurwoning_GV) %>% 
+  arrange(Codering, jaar) %>%             ## fill missing values (down then up)
+  group_by(Codering) %>%
+  fill(tot_gv, app_gv, tus_gv, hoek_gv, tkap_gv, vrij_gv, koop_gv, huur_gv,
+       .direction = "downup") %>%
+  ungroup() 
 
 df_gas_long <- df_cbs %>%       ## lang DF aardgasverbruik per woningtype/buurt
   filter(SoortRegio == "Buurt") %>%
@@ -245,12 +260,17 @@ df_gas_long <- df_cbs %>%       ## lang DF aardgasverbruik per woningtype/buurt
   left_join(df_lut[,c(5:6)], by = c("code" = "BU_CODE")) %>%
   rename(buurt = BU_NAAM) %>%
   mutate(verbr_type = "gas") %>% 
-  select(buurt, code, jaar, verbr_type, everything())
+  select(buurt, code, jaar, verbr_type, everything()) %>% 
+  arrange(code, jaar) %>%                 ## fill missing values (down then up)
+  group_by(code) %>%
+  fill(tot, app, tus, hoek, tkap, vrij, koop, huur,
+       .direction = "downup") %>%
+  ungroup() 
 
 ## -- step 1c. Woningtypen, Autos, Stedelijkheid ------------------------------
 df_won_wide <- df_cbs %>%          ## breed DF woningtypen, auto, stedelijkheid
-  select(Codering, SoortRegio, jaar,
-         MateVanStedelijkheid, PersonenautoSTotaal, 
+  select(Codering, SoortRegio, jaar, MateVanStedelijkheid, 
+         PersonenautoSTotaal, PersonenautoSPerHuishouden,
          PersonenautoSBrandstofBenzine, PersonenautoSOverigeBrandstof,
          NieuwbouwWoningen, Woningvoorraad, 
          p_Koopwoningen, p_HuurwoningenTotaal,
@@ -260,6 +280,7 @@ df_won_wide <- df_cbs %>%          ## breed DF woningtypen, auto, stedelijkheid
          p_Meergezinswoning) %>%
   rename(mvs = MateVanStedelijkheid,
          auto_tot = PersonenautoSTotaal,
+         auto_phh = PersonenautoSPerHuishouden,
          auto_benz = PersonenautoSBrandstofBenzine,
          auto_ovb = PersonenautoSOverigeBrandstof,
          tot_won = Woningvoorraad,
@@ -272,6 +293,7 @@ df_won_wide <- df_cbs %>%          ## breed DF woningtypen, auto, stedelijkheid
          p_egw = p_Eengezinswoning,
          p_koop = p_Koopwoningen,
          p_huur = p_HuurwoningenTotaal) %>% 
+  mutate(auto_phh = as.numeric(auto_phh)) %>% 
   mutate(app_won = round(p_app * tot_won / 100, 0),
          tus_won = round(p_tus * tot_won / 100, 0),
          hoek_won = round(p_hoek * tot_won / 100, 0),
@@ -280,7 +302,12 @@ df_won_wide <- df_cbs %>%          ## breed DF woningtypen, auto, stedelijkheid
          egw_won = round(p_egw * tot_won / 100, 0),
          koop_won = round(p_koop * tot_won / 100, 0),
          huur_won = round(p_huur * tot_won / 100, 0)) %>% 
-  select(-starts_with("p_"))
+  select(-starts_with("p_")) %>% 
+  arrange(Codering, jaar) %>%             ## fill missing values (down then up)
+  group_by(Codering) %>%
+  fill(mvs, auto_phh, auto_benz, auto_ovb,
+       .direction = "downup") %>%
+  ungroup() 
 
 df_won_long <- df_cbs %>% ## lang DF woningtypen, auto, stedelijkheid per buurt
   filter(SoortRegio == "Buurt") %>%
@@ -326,7 +353,7 @@ df_tot_wide <- df_elc_wide %>%
 
 write_rds(df_tot_wide, file = fpath_cln_onz)
 
-## -- step 3. Scenario's, Bouwplannen, Warmtevisie ----------------------------
+## -- step 3. Scenario's, Bouwplannen, Warmtevisie, Congestie -----------------
 df_tvw <- read_excel(fpath_raw_lut, sheet = "warmte")  ## transitievisie warmte
 df_bwp <- read_excel(fpath_raw_lut, sheet = "bouwplan") %>% 
   filter(naam != "TOTAAL")               ## ruimtelijke ontwikkelstrategie 2024
@@ -369,9 +396,10 @@ sf_scen_nw <- sf_brt %>%
          warmtevisie = warmte_srt,
          focusnaam = focusgebied) %>% 
   select(cbs, brt_naam, area, focusnaam, woning2024, elek2024,
-         warmtevisie, strat_extrawoning, need_extrawoning, geometry)
+         warmtevisie, strat_extrawoning, need_extrawoning, 
+         congestie, geometry)
 
-write_rds(sf_scen_nw, file =fpath_cln_scen)
+write_rds(sf_scen_nw, file = fpath_cln_scen)
 
 ## -------------------------------------------------------------------------- #
 ## -- end of script -----------------------------------------------------------

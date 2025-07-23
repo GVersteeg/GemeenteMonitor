@@ -4,9 +4,9 @@ author: "Gerrit Versteeg"
 output:
   flexdashboard::flex_dashboard:
     orientation: rows
-##    css: styles.css
     vertical_layout: fill
 ---
+
 
 ```{r housekeeping, include=FALSE}
 #| label: housekeeping
@@ -129,6 +129,7 @@ fpath_wtb <- paste0(dir_cln_won, fname_wtb)
 ## -------------------------------------------------------------------------- #
 ## -- step 1a. READ RDS research files -------------------------------------- #
 ## -------------------------------------------------------------------------- #
+
 sf_brt_cur <- read_rds(fpath_scen01)        ## LUT Buurten binnen Focusgebieden
 df_ev_past <- read_rds(fpath_ewt)                  ## Energieverbruik per buurt
 df_wt_past <- read_rds(fpath_wtb)               ## Aantallen woningen per buurt
@@ -380,12 +381,13 @@ fct_autos_gem <- df_ab_past_jr$nr_auto_tot[df_ab_past_jr$jaar == 2021] /
 df_ab_all_gem <- df_ab_all_nl %>%
   mutate(across(starts_with("nr_"), ~ .x * fct_autos_gem)) %>% 
 #  mutate(across(starts_with("nr_"), round, digits = 0)) %>%       # deprecated
-  mutate(across(starts_with("nr_"), \(x) round(x, digits = 0)) %>% 
+  mutate(across(starts_with("nr_"), \(x) round(x, digits = 0))) %>% 
   mutate(regio = ohg_name,
          jaar = as.character(jaar))
 
 ## replace total number of cars for past years with number from CBS --------- #
-##    and subtract nr_el from nr_tot to calulate nr_bs -----------------------#
+##    and subtract nr_el from nr_tot to calulate nr_bs ---------------------- #
+
 for (i in seq_along(jrn_pre)) {
   jr <- as.character(jrn_pre[i])
   df_ab_all_gem$nr_tot[which(df_ab_all_gem$jaar == jr)] <- 

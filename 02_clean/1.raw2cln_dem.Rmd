@@ -317,7 +317,7 @@ df_dem_corr <- df_dem %>%
        p_TweeOnderEenKapWoningEenGezins, 
        p_VrijstaandeWoningEenGezins,
        p_Koopwoningen, p_HuurwoningenTotaal,
-       .direction = "up") %>%
+       .direction = "updown") %>%
   ungroup() 
 
 df_dem_won <- df_dem %>% 
