@@ -267,13 +267,14 @@ lut_brt_cur_2bjoined <- sf_brt_cur %>%   ## prep indicator focusgebied for join
   st_drop_geometry() %>%
   rename(buurt = brt_naam,
          code = cbs) %>% 
-  mutate(focus = (focusnaam != "buitengebied")) %>% 
+  mutate(focus = (focusnaam != "buitengebied"),
+         area = round(as.numeric(area), digits = 0)) %>% 
   select(buurt, code, area, warmtevisie, focus, focusnaam, congestie) %>% 
   arrange(code)
 
 df_area_cur_2bjoined <- lut_brt_cur_2bjoined %>%   ## prepare brt-area for join
   mutate(area_perc =  100 * area/sum(area),
-         area_foc = if_else(focus, area, 0),
+         area_foc = if_else(focus, as.numeric(area), 0),
          area_perc_foc = if_else(focus, 100 * area_foc/sum(area_foc), 0))
 
 df_scen01_past <- df_ev_past_2bjoined %>%     ## join nr_won, gem_el_won, focus
@@ -378,7 +379,8 @@ fct_autos_gem <- df_ab_past_jr$nr_auto_tot[df_ab_past_jr$jaar == 2021] /
 ## ---- adapteer aantallen auto's van nederlandse cijfers naar gemeente ----- #
 df_ab_all_gem <- df_ab_all_nl %>%
   mutate(across(starts_with("nr_"), ~ .x * fct_autos_gem)) %>% 
-  mutate(across(starts_with("nr_"), round, digits = 0)) %>% 
+#  mutate(across(starts_with("nr_"), round, digits = 0)) %>%       # deprecated
+  mutate(across(starts_with("nr_"), \(x) round(x, digits = 0)) %>% 
   mutate(regio = ohg_name,
          jaar = as.character(jaar))
 
@@ -2432,7 +2434,7 @@ sc_code <- "S100"
 df_tbl_A721 <- df_A72 %>% 
   filter(scenario == sc_code) %>% 
   select(-scenario) %>% 
-  rename(`Lokale stad` = type)
+  rename(`S100` = type)
 
 ## display table
 NumCols <- 1:ncol(df_tbl_A721)
@@ -2459,7 +2461,7 @@ sc_code <- "S130"
 df_tbl_A722 <- df_A72 %>% 
   filter(scenario == sc_code) %>% 
   select(-scenario) %>% 
-  rename(Transitiestad = type)
+  rename(S130 = type)
 
 ## display table
 NumCols <- 1:ncol(df_tbl_A722)
