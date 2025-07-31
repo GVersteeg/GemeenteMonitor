@@ -3,9 +3,10 @@ title: "Monitor Woningbouwopgave"
 author: "(Gerrit Versteeg)"
 format: 
   dashboard:
-    nav-buttons: [linkedin, twitter, github]
+    logo: images/Logo_Weert.png
+    nav-buttons: [linkedin, github]
     github: "https://github.com/GVersteeg/GemeenteMonitor"
-logo: images/Logo_Weert.png
+
 ---
 
 ```{r housekeeping}
@@ -13,14 +14,16 @@ logo: images/Logo_Weert.png
 #| include: false
 
 ## --------------------- libraries -----------------------------------------
+## std. leaflet versions do NOT work !! ------------------------------------- #
+# devtools::install_github("dmurdoch/leaflet@crosstalk4") 
+## -------------------------------------------------------------------------- #
 # library(usmap)
 # library(gridExtra)
 # library(mapdeck)
-# library(crosstalk)
 if(!require(pacman)) install.packages("pacman")
 pacman::p_load(
-  tidyverse, plotly, sf, leaflet, gt,
-  reactable, bslib, bsicons, 
+  gt, tidyverse, plotly, sf, leaflet, DT,
+  reactable, bslib, bsicons, crosstalk,
   htmltools, lubridate, zoo, scales, shiny
   )
 
@@ -55,7 +58,7 @@ dir_lake <- Sys.getenv("POS_DATALAKE")
 dir_lake <- paste0(dir_lake, ohg_name, "/")
 dir_proj <- getwd()            
 dir_parm <- paste0(dir_proj, "/parameters/")                    ## parameters
-dir_pic <- "./pictures/"            ## pictures (loaded from wbo_et/pictures)
+dir_pic <- "images/"                ## pictures (loaded from wbo_et/pictures)
 dir_luts <- paste0(dir_lake, "luts/")                        ## lookup-tables
   
 dir_cln <- paste0(dir_lake, "schone_data/")                     ## clean data
@@ -104,10 +107,10 @@ fpath_wtb <- paste0(dir_cln_won, fname_wtb)
 ## -- Copy pictures from datalake to folder in working directory because of 
 ##    possible space in datalake-path. knitr cannot handle this ---------- #
 ## ----------------------------------------------------------------------- #
-# flist_pic <- list.files(path = dir_cln_pic, pattern = ".png", 
-#                     full.names = TRUE, recursive = TRUE)
-# file.copy(flist_pic, dir_pic, overwrite = TRUE)
-# rm(flist_pic)
+flist_pic <- list.files(path = dir_cln_pic, pattern = ".png", 
+                    full.names = TRUE, recursive = TRUE)
+file.copy(flist_pic, dir_pic, overwrite = TRUE)
+rm(flist_pic)
 
 ```
 
@@ -1045,7 +1048,7 @@ sf_brt_details <- sf_brt_details %>%
 
 ```
 
-# A1. Basis
+# 1. Basis
 
 ```{r section_A1}
 #| label: R-code prep A1
@@ -1069,7 +1072,7 @@ Deze kaart laat zien:
 
 ---
 
-## Row A1.1 {data-height="50%"}
+## Column A1.1
 
 ### Map A11. Basis op orde
 
@@ -1110,7 +1113,7 @@ leaflet(sf_brt) %>%
 
 ```
 
-# A2. 2024
+# 2. 2024
 
 ```{r section_A2}
 #| label: R-code prep A2
@@ -1172,7 +1175,7 @@ Labels van de waardevelden bovenaan rechts:
 
 ## Maincol_A.2
 
-### Row A2.1 {data-height="15%"}
+### Row A2.1 {height="15%"}
 
 ```{r prep_A21}
 #| label: R-code prep A21
@@ -1334,7 +1337,7 @@ value_box(
 
 ```
 
-### Row A2.2 {data-height=85%}
+### Row A2.2 {height=65%}
 
 ```{r section_A22}
 #| label: R-code prep A22
@@ -1369,12 +1372,11 @@ df_A22 <- df_scen01_details %>%
 
 ```
 
-
 #### Map A221: Jaargemiddeld elektriciteitsverbruik per buurt
 
 ```{r Map_A221}
 #| label: R-code map A221
-#| title: "Map A221. Gemiddeld elektriciteitsverbruik per buurt"
+#| title: "Map A221. Gemiddeld elektriciteitsverbruik per buurt (2024)"
 
 # Create a function that chooses a color palette and assigns it to the values
 pal <- colorNumeric(
@@ -1402,7 +1404,7 @@ leaflet(sf_A22) %>%
 
 ```{r Map_A222}
 #| label: R-code map A222
-#| title: "Map A222. Totaal elektriciteitsverbruik per buurt"
+#| title: "Map A222. Totaal elektriciteitsverbruik per buurt (2024)"
 
 pal <- colorNumeric(
   palette = "YlOrRd",
@@ -1425,28 +1427,1615 @@ leaflet(sf_A22) %>%
 
 ```
 
-#### Plot A223 Elektriciteitsverbruiken 2004-2024 {.fill}
+### Row A2.3 {height="20%"}
 
-```{r plot_A223}
-#| label: R-code plot A223
-#| title: "Plot A223. Elektriciteitsverbruiken 2004-2024"
+```{r plot_A231}
+#| label: R-code plot A231
+#| title: "Plot A231. Gemiddeld EV Woningen (2004-2024)"
 #| echo: false
 #| warning: false
 #| message: false
-#| fig-width: 6
-#| fig-height: 8
 
-## New facet label names for e_type variable
-supp.labs <- c("Gem.EV woningen", "Tot.EV woningen", "Tot.EV autos")
-names(supp.labs) <- c("gem_el_won", "tot_el_won", "tot_el_auto")
+## #| fig-width: 6
+## #| fig-height: 8
 
-ggplot(df_A22, aes(x = jaar, y = waarde, 
-                               group = won_type, color = won_type)) +
+ggplot(df_A22[df_A22$soort == "gem_el_won",],
+       aes(x = jaar, y = waarde, group = won_type, color = won_type)) +
   geom_line() + 
-  labs(y = "") +
-  scale_y_continuous(labels = scales::comma) +
-  facet_grid(rows = vars(soort), scales = "free_y", 
-             labeller = labeller(soort = supp.labs))
+  labs(y = "kWh") +
+  scale_y_continuous(labels = scales::comma)
 
 ```
+
+
+```{r plot_A232}
+#| label: R-code plot A232
+#| title: "Plot A232. Totaal EV Woningen (2004-2024)"
+#| echo: false
+#| warning: false
+#| message: false
+
+ggplot(df_A22[df_A22$soort == "tot_el_won",],
+       aes(x = jaar, y = waarde/1000000, group = won_type, color = won_type)) +
+  geom_line() + 
+  labs(y = "GWh") +
+  scale_y_continuous(labels = scales::comma)
+
+```
+
+```{r plot_A233}
+#| label: R-code plot A233
+#| title: "Plot A233. Totaal EV Auto's (2004-2024)"
+#| echo: false
+#| warning: false
+#| message: false
+
+## #| fig-width: 6
+## #| fig-height: 8
+
+ggplot(df_A22[df_A22$soort == "tot_el_auto",],
+       aes(x = jaar, y = waarde/1000000, group = won_type, color = won_type)) +
+  geom_line() + 
+  labs(y = "GWh") +
+  scale_y_continuous(labels = scales::comma)
+
+```
+
+
+# 3. Scenarios
+
+```{r section_A3}
+#| label: R-code prep A3
+#| include: false
+
+## -------------------------------------------------------------------------- #
+## ---- Samenstellen table met totalen per scenario (2024 & 2040) ----------- #
+## -------------------------------------------------------------------------- #
+periode = c("2024", "2040")
+df_A32 <- df_scen01_details %>% 
+  filter(as.numeric(jaar) %in% periode) %>% 
+  select(jaar, code, buurt, scenario, won_type, nr_won, nr_auto_el, nr_lp,
+         tot_el_won, tot_el_auto, tot_el) %>% 
+  filter(won_type == "tot") %>% 
+  group_by(jaar, scenario) %>% 
+  summarise(nr_won = sum(nr_won, na.rm = TRUE),
+            tot_el_won = sum(tot_el_won, na.rm = TRUE),
+            nr_auto_el = sum(nr_auto_el, na.rm = TRUE),
+            tot_el_auto = sum(tot_el_auto, na.rm = TRUE),
+            tot_el = sum(tot_el, na.rm = TRUE),
+            nr_lp = sum(nr_lp, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  select(jaar, scenario, nr_won, nr_auto_el, nr_lp, tot_el_won, tot_el_auto, tot_el)
+
+df_tbl_A32 <- df_A32 %>% 
+  mutate(GWh_woningen = tot_el_won / 1000000,
+         GWh_autos = tot_el_auto / 1000000,
+         GWh_totaal = tot_el / 1000000) %>%
+  select(-tot_el_won, -tot_el_auto, -tot_el) %>%
+  rename(aantal_woningen = nr_won,
+         aantal_elektr_autos = nr_auto_el,
+         aantal_laadpalen = nr_lp) %>% 
+  pivot_longer(cols = -c(scenario, jaar), 
+               names_to = "type", values_to = "waarde") %>% 
+  pivot_wider(id_cols = scenario, 
+              names_from = c(jaar, type), names_sep = ".", names_prefix = "jr",
+              values_from = waarde) %>%  
+  mutate(toename.aantal_woningen = jr2040.aantal_woningen - jr2024.aantal_woningen,
+         toename.aantal_elektr_autos = jr2040.aantal_elektr_autos - 
+           jr2024.aantal_elektr_autos,
+         toename.aantal_laadpalen = jr2040.aantal_laadpalen - jr2024.aantal_laadpalen,
+         toename.GWh_woningen = jr2040.GWh_woningen - jr2024.GWh_woningen,
+         toename.GWh_autos = jr2040.GWh_autos - jr2024.GWh_autos,
+         toename.GWh_totaal = jr2040.GWh_totaal - jr2024.GWh_totaal) %>% 
+  pivot_longer(cols = -c(scenario),
+               names_to = c("jaar", "type"), names_sep = "\\.",
+               values_to = "waarde") %>% 
+  mutate(jaar = str_remove(jaar, "jr")) %>% 
+  pivot_wider(id_cols = c(jaar, type),
+              names_from = scenario,
+              values_from = waarde) %>% 
+  select(jaar, type, S100, S130) %>% 
+## prepare table with display controls
+  mutate(seq = ifelse(jaar == "2024", 1, 
+                      ifelse(jaar == "2040", 2, 3))) %>% 
+  mutate(suppress = ifelse(jaar == lag(jaar), 1, 0),
+         suppress = ifelse(is.na(suppress), 0, suppress))
+
+## -------------------------------------------------------------------------- #
+## ---- Tabel voor sidebar met BENG-aannames -------------------------------- #
+## -------------------------------------------------------------------------- #
+df_tbl_A31 <- lut_beng %>% 
+  select(won_type, gem_el_won, gem_el_beng_wnet, gem_el_beng_wpomp) %>% 
+  rename(type = won_type,
+         huidig = gem_el_won,
+         w.pomp = gem_el_beng_wpomp,
+         w.net = gem_el_beng_wnet)
+
+## -------------------------------------------------------------------------- #
+## create SharedData for CrossTalk ------------------------------------------ #
+## -------------------------------------------------------------------------- #
+# share_tbl_A31 <- SharedData$new(df_tbl_A31, key = ~type, group = "A3")
+share_tbl_A32 <- SharedData$new(df_tbl_A32, key = ~type, group = "A3")
+# share_map_A32 <- SharedData$new(df_map_A32, key = ~dos_id, group = "A3")
+
+```
+
+
+## Inputs_A.3 {.sidebar}
+  
+**A3. Scenarios**  
+
+<font size="1em">
+
+Scenario-berekeningen rond de belasting van het electriciteitsnetwerk als consequentie van de woningbouw-opgave conform de twee scenario's in de omgevingsvisie Weert 2040.
+
+**Aannames**
+
+Het CBS geeft aan dat het gemiddeld autobezit per huishouden in de Randstad **0.6** is.  Tevens heeft PWC voor het Rijk een onderzoek gedaan naar het verwachte aantal elektrische auto's in 2050. Deze gegevens zijn de basis geweest om het aantal elektrische auto's te prognotiseren.
+
+Alle nieuwe te bouwen woningen zijn "bijna energieneutrale woningen" (BENG-woning). Hieronder is een tabel weergegeven met het aangenomen jaargemiddeld elektr.verbruik per woningtype, rekening houdend met het type warmtevoorziening vanuit de warmtevisie.
+
+De aanname is gebaseerd op de wettelijke eis dat BENG woningen een maximaal elektriciteitsverbruik hebben van 76 kWh/m2 (bouw-ervaring leert dat dit eerder op 50 kWh/m2 ligt). Als het gemiddelde woningoppervlakte 71.45 m2 is dan resulteert dit in een maximaal elektriciteitsverbruik van 5430 kWh per jaar.
+
+</font>
+
+---
+
+```{r}
+#| label: R-code filter A3b
+
+filter_checkbox("A3", "Type meting", share_tbl_A32, ~type,
+                 inline = FALSE)
+
+```
+
+
+## Column A3.1 {data-width=60%}
+
+### Table A31a. Overzichtstabel scenarios (2024 versus 2040) {height=60%}
+
+```{r table_A31a}
+#| label: R-code tbl A31a
+#| title: "Table A31a. Overzichtstabel scenarios (2024 versus 2040)"
+
+## display table in DT
+# NumCols <- 1:ncol(df_tbl_A32)
+# share_tbl_A32 %>% 
+#   DT::datatable(rownames = FALSE,
+#                 options = list(dom = "t", 
+#                                class = "compact",
+#                                columnDefs = list(
+#                                  list(visible = FALSE,
+#                                       targets = c(4,5)))
+#                                 )) %>%
+#   DT::formatStyle(columns = NumCols, 'vertical-align'='top') %>% 
+#   DT::formatStyle('seq', target = 'row', 
+#                   backgroundColor = 
+#                     DT::styleEqual(c(1, 2, 3), 
+#                     c('#EEFFFF', '#EEFFEE', '#FDE7E8'))) %>% 
+#   DT::formatStyle('jaar', 'suppress', 
+#                   color = DT::styleEqual(c(0, 1), c('#000000', '#F2F2F2'))) %>% 
+#   DT::formatCurrency(3:5, currency = '', digits = 0, mark = ".")
+
+df_tbl_A32 |> 
+  select(-seq, -suppress) |> 
+  group_by(jaar) |> 
+  gt() |> 
+  tab_header(
+    title = "Overzicht scenarios (2024, 2040, toename)"
+    ) |> 
+  cols_label(
+    jaar = "Jaar",
+    type = "Soort"
+    ) |> 
+  cols_add(dec_digits = c(0, 0, 0, 2, 2, 2,
+                          0, 0, 0, 2, 2, 2,
+                          0, 0, 0, 2, 2, 2)
+          ) |>
+  fmt_number(
+    columns = c(S100, S130),
+    decimals = from_column(column = "dec_digits"),
+    sep_mark = ".",
+    dec_mark = ",",
+    use_seps = TRUE
+   ) |>  
+  cols_hide(dec_digits) |>
+  tab_style(cell_fill("gray"), cells_row_groups())
+ 
+```
+
+### Table A31b. Aanames onder BENG Elektr.verbruik {height=40%}
+
+```{r table_A31b}
+#| label: R-code tbl A31b
+#| title: "Table A31b. Aannames onder BENG Elektr.verbruik"
+
+# NumCols <- 1:ncol(df_tbl_A31)
+# df_tbl_A31 %>% 
+#   DT::datatable(rownames = FALSE,
+#                 options = list(dom = "t",
+#                                bPaginate=FALSE, scrollY = "250px",
+#                                select = list(style = 'multiple', items = 'row'),
+#                                autoWidth = TRUE, paging=FALSE,
+#                                class = "compact",
+#                                # headerCallback = DT::JS(
+#                                #    "function(thead) {",
+#                                #    "  $(thead).css('font-size', '0.7em');",
+#                                #    "}" ),
+#                                fillContainer = TRUE))
+
+gt(df_tbl_A31) %>%
+  tab_header(
+    title = "Aannames BENG-waarden per woningtype"
+  ) %>%
+  cols_label(
+    type = "Woningtype",
+    huidig = "2024",
+    w.pomp = "BENG warmtepomp",
+    w.net = "BENG warmtenet"
+  ) %>%
+  fmt_number(
+    columns = c(huidig, w.pomp, w.net),
+    decimals = 0,
+    use_seps = TRUE
+  ) %>%
+  tab_spanner(
+    label = "Gem. EV (kWh/jaar)",
+    columns = c(huidig, w.pomp, w.net)
+  ) %>%
+  tab_source_note(
+    source_note = "*) zie aannames hierboven"
+  ) %>%
+    tab_options(table.width = pct(100))
+
+```
+
+## Column A3.2 {data-width=40%}
+
+### Plot A32a. Scenario: Ruimt. Ontw.strategie 100% (+4k5 woningen, diverse types)
+
+```{r plot_A32a}
+#| label: R-code plot A32a
+#| title: "Plot A32a. Scenario: Ruimt. Ontw.strategie 100% (+4k5 woningen, diverse types)"
+#| echo: false
+#| warning: false
+#| message: false
+
+## transform df_scen01_details to fit plot ---------------------------------- #
+df_plot_A32 <- df_scen01_details %>% 
+  filter(won_type == "tot") %>% 
+  mutate(jaar = as.numeric(jaar)) %>% 
+  select(jaar, code, scenario, won_type, tot_el_won, tot_el_auto, tot_el) %>%
+  group_by(jaar, scenario) %>% 
+  summarise(tot_el_won = sum(tot_el_won, na.rm = TRUE),
+            tot_el_auto = sum(tot_el_auto, na.rm = TRUE),
+            tot_el = sum(tot_el, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  rename(woningen = tot_el_won,
+         autos = tot_el_auto,
+         totaal = tot_el) %>% 
+  pivot_longer(cols = c("woningen", "autos", "totaal"),
+               names_to = "type", values_to = "verbruik") %>% 
+  mutate(verbruik = verbruik / 1000000)                     ## van kWh naar GWh
+
+## select and display ------------------------------------------------------- #
+ggplot(df_plot_A32[df_plot_A32$scenario == "S100",],
+       aes(x = jaar, y = verbruik, group = type, color = type)) +
+  geom_line() + 
+  labs(y = "Totaal verbruik (GWh)")
+
+```
+
+### Plot A32b. Scenario: Ruimt. Ontw.strategie 100% (+6k woningen, appartementen)
+
+```{r plot_A32b}
+#| label: R-code plot A32b
+#| title: "Plot A32b. Scenario: Ruimt. Ontw.strategie 130% (+6k woningen, appartementen)"
+#| echo: false
+#| warning: false
+#| message: false
+
+## select and display ------------------------------------------------------- #
+ggplot(df_plot_A32[df_plot_A32$scenario == "S130",],
+       aes(x = jaar, y = verbruik, group = type, color = type)) +
+  geom_line() + 
+  labs(y = "Totaal verbruik (GWh)")
+
+```
+
+
+# 4. Congestie
+
+## Inputs_A.4 {.sidebar}
+  
+**A4. Schaarste aan elektriciteit**  
+
+<font size="1em">
+
+De levering van elektricteit aan woningen en bedrijven neemt toe. Dit wordt vooral veroorzaakt door beperkingen in het elektriciteitsnetwerk. 
+
+De netbeheerders hebben de capaciteit van het elektriciteitsnetwerk in kaart gebracht en deze kaarten zijn openbaar gemaakt. De kaarten zijn te vinden op de website van Netbeheer Nederland (https://www.netbeheernederland.nl/).
+Meer specifiek: https://data.partnersinenergie.nl/capaciteitskaart/rnb/afname
+
+De afbeeldingen hiernaast zijn afgeleid van de Capaciteitskaart Netbeheer Nederland en tonen de situatie per begin 2025 in Nederland als geheel en de situatie voor Weert specifiek. Weert komt er nog genadig af, sommige buurten kennen een dreigende transportschaartse en de overige buurten zijn voorlopig 'veilig'.
+
+---
+
+Legenda afbeeldingen links:
+
+```{r picture_A42, echo = F, out.width = '100%'}
+#| label: R-code side A4a
+
+knitr::include_graphics(paste0(dir_pic, "Legenda_ES.png"))
+
+```
+
+---
+
+Op de kaart rechts wordt getoond in welke buurten in Den Haag de transportschaarste precies en of dit voor hele buurt geldt of slechts een gedeelte:
+
+Legenda kaart rechts:
+
+```{r picture_A43, echo = F, out.width = '100%'}
+#| label: R-code side A4b
+
+knitr::include_graphics(paste0(dir_pic, "Legenda_ESbrt.png"))
+
+```
+
+</font>
+
+---
+
+## Column A4.1 {width=30%}
+ 
+### Pic A41a. Electriciteitsschaarste Nederland
+
+```{r picture_A41a, echo = F, out.width = '100%'}
+#| label: R-code pic A41a
+#| title: "Pic A41a. Electriciteitsschaarste Nederland"
+
+knitr::include_graphics(paste0(dir_pic, "El_schaarste_NL.png"))
+
+```
+
+### Pic A41b. Electriciteitsschaarste Gemeente
+
+```{r picture_A41b, echo = F, out.width = '100%'}
+#| label: R-code pic A41b
+#| title: "Pic A41b. Electriciteitsschaarste Gemeente"
+
+knitr::include_graphics(paste0(dir_pic, "El_schaarste_Gem.png"))
+
+```
+
+## Column A4.2 {width=70%}
+-----------------------------------------------------------------------
+
+### Map A42. Buurten met en zonder transportschaarste
+
+```{r map_A42}
+#| label: R-code map A42
+#| title: "Map A42. Buurten met en zonder transportschaarste"
+
+## make shape file specific to this map
+sf_A42 <- sf_brt_details
+sf_A42 <- sf_A42 %>% 
+  select(c(1:23))
+
+# map
+leaflet(sf_A42) %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>% 
+  addPolygons(data = sf_gem, group = "gemeentegrens",
+    stroke = TRUE, color = "black", weight="0.75",
+    fill = FALSE) %>%
+  addPolygons(data = sf_A42, group = "buurten",
+    stroke = TRUE, color = "brown",
+    weight = "1", smoothFactor = 0.3,
+    fillOpacity = 0.3, 
+    fillColor = ~ifelse(sf_A42$congestie == "Ja", "orange",
+                        ifelse(sf_A42$congestie == "Nee", "green",
+                               "yellow")),
+    highlight = highlightOptions(weight = 2, color = "black",
+                                 fillOpacity = 0.3, bringToFront = TRUE),
+    label = ~paste0(sf_A42$naam),
+    popup = ~paste0(sf_A42$naam, "<br>",
+                    "- CBS-code: ", sf_A42$code, "<br>")) %>%
+  addPolygons(data = sf_brt_foc, group = "focusbuurten",
+    stroke = TRUE, color = "brown",
+    weight="1", smoothFactor = 0.3,
+    fillOpacity = 0.2, fillColor = "purple",
+    highlight = highlightOptions(weight = 2, color = "black",
+                                 fillOpacity = 0.3, bringToFront = TRUE),
+    label = ~paste0(sf_brt_foc$naam),
+    popup = ~paste0(sf_brt_foc$naam, "<br>",
+                    "- CBS: ", sf_brt_foc$code, "<br>",
+                    "- Wijk: ", sf_brt_foc$naam)) %>%
+  addLayersControl(
+    baseGroups = c("basemap (ESRI)"),
+    overlayGroups = c("gemeentegrens", "buurten", "focusbuurten"),
+    options = layersControlOptions(collapsed = FALSE))
+```
+
+
+# 5. Netwerk  
+
+```{r section_A5, include=FALSE}
+#| label: R-code prep A5
+#| title: "A5. Netwerk"
+
+## -------------------------------------------------------------------------- #
+## ---- Bepalen van de contour rond de buurten die congestie hebben --------- #
+## ---- Daarna congestie-contour tegen sf_lsv / sf_msv leggen om de --------- #
+## -----attribuut congestie aan sf_lsv en ls_msv toe te kunnen voegen ------- #
+## -------------------------------------------------------------------------- #
+
+## -------------------------------------------------------------------------- #
+## contour omn congestie_buurten -------------------------------------------- #
+## -------------------------------------------------------------------------- #
+sf_cong <- sf_brt_details %>% 
+  filter(congestie == "Ja") %>% 
+  select(code, naam, congestie, geometry)
+
+sf_cong <- sf_cong %>% 
+  group_by(congestie) %>%
+  summarise() %>%
+  ungroup()
+
+## -------------------------------------------------------------------------- #
+## add attribute "congestie" = "Ja" als netwerk intersects met sf_cong ------ #
+## -------------------------------------------------------------------------- #
+sf_lsv_tmp <- sf_lsv %>% 
+  mutate(congestie = ifelse(st_intersects(sf_lsv, sf_cong, sparse = FALSE),
+                            "Ja", "Nee"))
+
+sf_msv_tmp <- sf_msv %>% 
+  mutate(congestie = ifelse(st_intersects(sf_msv, sf_cong, sparse = FALSE),
+                            "Ja", "Nee"))
+
+sf_stat_tmp <- sf_hms %>% 
+  bind_rows(sf_mss) |> 
+  bind_rows(sf_lss)
+sf_stat_tmp <- sf_stat_tmp |>
+  mutate(congestie = ifelse(st_intersects(sf_stat_tmp, sf_cong, sparse = FALSE),
+                            "Ja", "Nee")) |> 
+  mutate(diameter = case_when(
+    spannings == "LS" ~ 3,
+    spannings == "MS" ~ 6,
+    spannings == "HS" ~ 9))
+
+## find the centroid of the linestrings in sf_stat
+sf_stat <- sf_stat_tmp %>% 
+  mutate(centroid = st_centroid(geometry)) %>% 
+  st_drop_geometry() %>% 
+  rename(geometry = centroid)
+
+# Calculate centroids
+centroids <- st_centroid(sf_stat_tmp)
+
+# Print the centroid sf object
+print(centroids)
+
+# To replace the original geometry with the centroids:
+st_geometry(sf_stat_tmp) <- st_geometry(centroids)
+sf_stat <- sf_stat_tmp
+rm(sf_stat_tmp)
+
+## check class of geometry
+class(sf_stat$geometry)
+
+```
+
+
+## Inputs_A.5 {.sidebar}
+-----------------------------------------------------------------------
+  
+**A5. Capaciteit elektriciteitsnetwerk**  
+
+<font size="1em">
+
+De kaart hiernaast laat het elektriciteitsnetwerk zien op de achtergrond van de buurten. 
+
+Legenda
+
+```{r picture_A52, echo = F, out.width = '100%'}
+#| label: R-code side A52
+
+knitr::include_graphics(paste0(dir_pic, "Legenda_EVbd.png"))
+```
+
+</font>
+
+
+---
+
+
+## Column A5.2
+-----------------------------------------------------------------------
+
+### Map A52. Overzicht elektriciteitsnetwerk met en zonder transportschaarste
+
+```{r map_A52}
+#| label: R-code map A52
+#| title: "Map A52. Overzicht elektriciteitsnetwerk met en zonder transportschaarste"
+
+## make shape file specific to this map
+sf_A52 <- sf_brt_details
+sf_A52 <- sf_A52 %>% 
+  select(c(1:23))
+
+# map
+leaflet(sf_A52) %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>% 
+  addPolylines(data = sf_lsv_tmp, group = "netwerk - laag",
+              stroke = TRUE,
+              color = ~ifelse(sf_lsv_tmp$congestie == "Nee",
+                                  "green", "orange"),
+              weight="1", smoothFactor = 0.3, fillOpacity = 0.7,
+              fillColor = "White") %>%
+  addPolylines(data = sf_msv_tmp, group = "netwerk - midden",
+              stroke = TRUE,
+              color = ~ifelse(sf_msv_tmp$congestie == "Nee",
+                                  "black", "red"),
+              weight="2", smoothFactor = 0.3, fillOpacity = 0.7,
+              fillColor = "white") %>%
+  # addPolylines(data = sf_stat_tmp, group = "stations",
+  #             stroke = TRUE,
+  #             color = ~ifelse(sf_msv_tmp$congestie == "Nee",
+  #                                 "black", "red"),
+  #             weight="2", smoothFactor = 0.3, fillOpacity = 0.7,
+  #             fillColor = "white") %>%
+  addPolygons(data = sf_A52, group = "buurten",
+    stroke = TRUE, color = "brown",
+    weight = "1", smoothFactor = 0.3,
+    fillOpacity = 0.1, fillColor = "gray",
+    highlight = highlightOptions(weight = 2, color = "black",
+                                 fillOpacity = 0.3, bringToFront = TRUE),
+    label = ~paste0(sf_A52$naam),
+    popup = ~paste0(sf_A52$naam, "<br>",
+                    "- CBS-code: ", sf_A52$code, "<br>")) %>%
+  addPolygons(data = sf_brt_foc, group = "focusbuurten",
+    stroke = TRUE, color = "brown",
+    weight="1", smoothFactor = 0.3,
+    fillOpacity = 0.2, fillColor = "purple",
+    highlight = highlightOptions(weight = 2, color = "black",
+                                 fillOpacity = 0.3, bringToFront = TRUE),
+    label = ~paste0(sf_brt_foc$naam),
+    popup = ~paste0(sf_brt_foc$naam, "<br>",
+                    "- CBS: ", sf_brt_foc$code, "<br>",
+                    "- Wijk: ", sf_brt_foc$naam)) %>%
+  addCircleMarkers(data = sf_stat, group = "stations",
+    stroke = TRUE, color = "brown",
+    radius = ~diameter, fillOpacity = 0.2, fillColor = "purple",
+    label = ~paste0(sf_stat$spannings, ": ", sf_stat$id,
+                    " - congestie: ", sf_stat$congestie)
+    ) |> 
+  addLayersControl(
+    baseGroups = c("basemap (ESRI)"),
+    overlayGroups = c("netwerk - laag", "netwerk - midden", "buurten", "focusbuurten", "stations"),
+    options = layersControlOptions(collapsed = FALSE))
+
+```
+
+# 6. 2040
+
+```{r section_A6, include=FALSE}
+#| label: R-code prep A6
+#| include: false
+
+## -------------------------------------------------------------------------- #
+## ---- Gather data --------------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+periode <- c(as.character(end_all))
+df_A6 <- df_scen01_details %>% 
+  filter(jaar %in% periode,
+         won_type == "tot") %>% 
+  group_by(scenario, jaar) %>% 
+  summarise(tot_el_won = sum(tot_el_won, na.rm = TRUE),
+            tot_el_auto = sum(tot_el_auto, na.rm = TRUE),
+            tot_el = sum(tot_el, na.rm = TRUE),
+            nr_won = sum(nr_won, na.rm = TRUE),
+            nr_auto_el = sum(nr_auto_el, na.rm = TRUE),
+            nr_lp = sum(nr_lp, na.rm = TRUE)
+            ) %>% 
+  ungroup()
+
+## Get values for value boxes ---------------------------------------------
+df_A6_nr <- df_A6 %>% 
+  select(scenario, tot_el_won, tot_el_auto, nr_won, nr_auto_el, nr_lp)
+
+nr_won_S100 <- round(df_A6_nr$nr_won[df_A6_nr$scenario == "S100"], digits = 0)
+nr_won_S130 <- round(df_A6_nr$nr_won[df_A6_nr$scenario == "S130"], digits = 0)
+nr_auto_S100 <- round(df_A6_nr$nr_auto_el[df_A6_nr$scenario == "S100"],
+                      digits = 0)
+nr_auto_S130 <- round(df_A6_nr$nr_auto_el[df_A6_nr$scenario == "S130"], 
+                      digits = 0)
+
+## Convert to GWh -------------------------------------------------------------
+el_won_S100 <- round(df_A6_nr$tot_el_won[df_A6_nr$scenario == "S100"]/1000000,
+                     digits = 1)
+el_won_S130 <- round(df_A6_nr$tot_el_won[df_A6_nr$scenario == "S130"]/1000000,
+                     digits = 1)
+el_auto_S100 <- round(df_A6_nr$tot_el_auto[df_A6_nr$scenario == "S100"]/1000000, 
+                      digits = 1)
+el_auto_S130 <- round(df_A6_nr$tot_el_auto[df_A6_nr$scenario == "S130"]/1000000, 
+                      digits = 1)
+
+el_won_S100 <- prettyNum(el_won_S100, big.mark = ".", decimal.mark = ",")
+el_won_S130 <- prettyNum(el_won_S130,big.mark = ".", decimal.mark = ",")
+el_auto_S100 <- prettyNum(el_auto_S100, big.mark = ".", decimal.mark = ",")
+el_auto_S130 <- prettyNum(el_auto_S130, big.mark = ".", decimal.mark = ",")
+nr_won_S100 <- prettyNum(nr_won_S100, big.mark = ".", decimal.mark = ",")
+nr_won_S130 <- prettyNum(nr_won_S130,big.mark = ".", decimal.mark = ",")
+nr_auto_S100 <- prettyNum(nr_auto_S100, big.mark = ".", decimal.mark = ",")
+nr_auto_S130 <- prettyNum(nr_auto_S130, big.mark = ".", decimal.mark = ",")
+
+## -------------------------------------------------------------------------- #
+## klaarzetten dataframes rond elektriciteitsverbruik ----------------------- #
+## -------------------------------------------------------------------------- #
+## --- Data per buurt in 2040 ----------------------------------------------- #
+sf_A62 <- sf_brt_details 
+sf_A62 <- sf_A62 %>% 
+  select(code, naam, S100_tot_tot_el, S130_tot_tot_el, 
+         cur_tot_nr_won, S100_tot_nr_won, S130_tot_nr_won) %>%
+  rename(S100_el = S100_tot_tot_el,
+         S130_el = S130_tot_tot_el,
+         cur_nr = cur_tot_nr_won,
+         S100_nr = S100_tot_nr_won,
+         S130_nr = S130_tot_nr_won,) %>% 
+  mutate(S100_add = S100_nr - cur_nr,
+         S130_add = S130_nr - cur_nr,
+         S100_el = ifelse(is.na(S100_el),0,S100_el),
+         S130_el = ifelse(is.na(S130_el),0,S130_el))
+
+## --- Vaststellen cuts in color palette ------------------------------------ #
+# Create a function that choose a color palette and assign it to the values
+v_cuts <- c(0, 2000000, 4000000, 6000000, 8000000, 10000000, 12000000, 14000000, 16000000)
+colorbins_S100 <- colorBin("YlOrRd", domain = sf_A62$S100_el, bins = v_cuts)
+colorbins_S130 <- colorBin("YlOrRd", domain = sf_A62$S130_el, bins = v_cuts)
+
+## -------------------------------------------------------------------------- #
+## ---- Samenstellen table met totalen per scenario (2040) ------------------ #
+## -------------------------------------------------------------------------- #
+periode = c("2040")
+df_A63 <- df_scen01_details %>% 
+  filter(as.numeric(jaar) %in% periode) %>% 
+  select(jaar, code, buurt, scenario, won_type, nr_won, nr_auto_el, nr_lp,
+         tot_el_won, tot_el_auto, tot_el) %>% 
+  filter(won_type == "tot") %>% 
+  group_by(jaar, scenario) %>% 
+  summarise(nr_won = sum(nr_won, na.rm = TRUE),
+            tot_el_won = sum(tot_el_won, na.rm = TRUE),
+            nr_auto_el = sum(nr_auto_el, na.rm = TRUE),
+            tot_el_auto = sum(tot_el_auto, na.rm = TRUE),
+            tot_el = sum(tot_el, na.rm = TRUE),
+            nr_lp = sum(nr_lp, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  select(jaar, scenario, nr_won, nr_auto_el, nr_lp, tot_el_won, tot_el_auto, tot_el)
+
+df_tbl_A63 <- df_A63 %>% 
+  rename(aantal_woningen = nr_won,
+         aantal_elektr_autos = nr_auto_el,
+         aantal_laadpalen = nr_lp,
+         kWh_woningen = tot_el_won,
+         kWh_autos = tot_el_auto,
+         kWh_totaal = tot_el) %>% 
+  pivot_longer(cols = -c(scenario, jaar), 
+               names_to = "type", values_to = "waarde") %>% 
+  pivot_wider(names_from = scenario, values_from = waarde) %>%  
+  select(-jaar) %>%
+  select(type, S100, S130)
+
+
+## -------------------------------------------------------------------------- #
+## create SharedData for CrossTalk ------------------------------------------ #
+## -------------------------------------------------------------------------- #
+
+```
+
+## Inputs_A.6 {.sidebar}
+
+**A6. Totaal elektriciteitsverbruik per buurt in 2040**  
+
+<font size="0.8em">
+
+NB. Alle cijfers rond energieverbruik zijn in kWh weergegeven en afgeleid van de scenariobeschrijvingen in de omgevingsvisie.
+
+**Ruimt.Ontw.Strategie (100%)**
+
+* Extra woningen: 4.500  
+* Wanneer: 2040  
+* Waar: niet in buitengebieden  
+* Wat: Diverse woningtypes (cf. buurt-opbouw)  
+
+**Ruimt.Ontw.Strategie (130%)**
+
+* Extra woningen: 6.000  
+* Wanneer: 2040  
+* Waar: niet in buitengebieden  
+* Wat: ET-proof appartementen  
+
+</font>
+
+---
+
+## Col_A61
+
+### Row A61.1 {height=15%}
+
+```{r valueboxes_A611}
+#| label: valueboxes_A611
+#| title: "Ruimt.Ontw.Strategie 100%"
+
+## A611a: Totaal S100 ---------------------------------------------------
+waarde <- el_won_S100
+sw_higher <- FALSE
+waarde <- prettyNum(waarde, big.mark = ".", decimal.mark = ",")
+value_box(
+  title = paste0("Woningen (", nr_won_S100, ")"),
+  value = paste0(waarde, " GWh"),
+  showcase = bsicons::bs_icon("house-door"),
+  theme = ifelse(sw_higher, "warning", "primary")
+)
+
+## A611b: Totaal S100 ---------------------------------------------------
+waarde <- el_auto_S100
+waarde <- prettyNum(waarde, big.mark = ".", decimal.mark = ",")
+value_box(
+  title = paste0("El. Auto's (", nr_auto_S100, ")"),
+  value = paste0(waarde, " GWh"),
+  showcase = bsicons::bs_icon("car-front"),
+  theme = ifelse(sw_higher, "warning", "primary")
+)
+
+## A611c: Totaal S100 ---------------------------------------------------
+waarde <- round(df_A6$tot_el[df_A6$scenario == "S100"], digits = 0)
+waarde <- round(waarde / 1000000, digits = 1)             ## convert to GWh
+waarde <- prettyNum(waarde, big.mark = ".", decimal.mark = ",")
+value_box(
+  title = paste0("Totaal verbruik"),
+  value = paste0(waarde, " GWh"),
+  showcase = bsicons::bs_icon("globe2"),
+  theme = ifelse(sw_higher, "warning", "primary")
+)
+
+```
+
+### Row A61.2 {height=60%}
+
+```{r Map_A621}
+#| label: R-code map A612
+#| title: "Ruimtelijke ontwikkelstrategie: 100% scenario (4k5 woningen, diverse types conform buurtprofiel)"
+
+# Create HTML-labels
+labels <- sprintf(
+  "<strong>%s</strong><br/>Verbruik: %s<br/>Extra won: %s",
+  sf_A62$naam,  
+  paste0(prettyNum(round(sf_A62$S100_el, digits = -3), big.mark = ".", decimal.mark = ","), " kWh"),
+  prettyNum(round(sf_A62$S100_add, digits = 0), big.mark = ".", decimal.mark = ",")) %>%
+  lapply(htmltools::HTML)
+
+# Create map
+leaflet(sf_A62) %>%
+  addTiles() %>%
+  ## focusbuurten
+  addPolygons(data = sf_brt_foc, group = "focusbuurten",
+    stroke = TRUE, color = "brown",
+    weight="1", smoothFactor = 0.3,
+    fillOpacity = 0.2, fillColor = "purple",
+    highlight = highlightOptions(weight = 2, color = "black",
+                                 fillOpacity = 0.3, bringToFront = TRUE),
+    label = ~paste0(sf_brt_foc$naam),
+    popup = ~paste0(sf_brt_foc$naam, "<br>",
+                    "- CBS: ", sf_brt_foc$code, "<br>",
+                    "- Wijk: ", sf_brt_foc$naam)) %>%
+  ## congestie netwerk
+  addPolygons(data = sf_A42, group = "congestie",
+    stroke = TRUE, color = "brown",
+    weight = "1", smoothFactor = 0.3,
+    fillOpacity = 0.3, 
+    fillColor = ~ifelse(sf_A42$congestie == "Ja", "blue",
+                        ifelse(sf_A42$congestie == "Nee", "green",
+                               "lightblue")),
+    label = ~paste0("Dreigende congestie: ", sf_A42$congestie)) %>%
+  ## buurten elektriciteitsverbruik
+  addPolygons(data = sf_A62, group = "verbruik",
+    stroke = TRUE, color = "red",
+    weight="1", smoothFactor = 0.3, fillOpacity = 0.7,
+    fillColor = ~colorbins_S100(sf_A62$S100_el),
+    highlight = highlightOptions(weight = 2, color = "red",
+                                           fillOpacity = 0.3,
+                                           bringToFront = TRUE),
+    label = ~labels) %>%
+  ## layer check-marks
+  addLayersControl(
+    baseGroups = c("basemap (OSM)"),
+    overlayGroups = c("verbruik", "focusbuurten", "congestie"),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+
+```
+
+### Row A61.3 {height=25%}
+
+```{r plot_A613}
+#| label: R-code plot A613
+
+## make a stacked barchart for the number of woningen per woning type 
+## for the years from 2024 to 2040
+df_plot_A613 <- df_scen01_details %>% 
+  filter(won_type != "tot",
+         scenario == "S100") %>% 
+  filter(jaar %in% as.character(c(msr_jr:end_all))) %>% 
+  select(jaar, won_type, nr_won) %>% 
+  group_by(jaar, won_type) %>% 
+  summarise(nr_won = sum(nr_won, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(jaar = as.integer(jaar)) |> 
+  mutate(won_type = as.factor(won_type))
+
+ggplot(df_plot_A613, aes(x = jaar, y = nr_won, fill = won_type)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Jaar", y = "", fill = "Woningtype") +
+  scale_fill_brewer(palette = "Set3") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  scale_y_continuous(labels = scales::comma) +
+  ggtitle("Aantal woningen per type") 
+
+```
+
+## Col_A62
+
+### Row A62.1 {height=15%}
+
+```{r valueboxes_A621}
+#| label: valueboxes_A621
+#| title: "Ruimt.Ontw.Strategie 130%"
+
+## A621a: Woningen S130 ---------------------------------------------------
+waarde <- el_won_S130
+sw_higher <- TRUE
+waarde <- prettyNum(waarde, big.mark = ".", decimal.mark = ",")
+value_box(
+  title = paste0("Woningen (", nr_won_S130, ")"),
+  value = paste0(waarde, " GWh"),
+  showcase = bsicons::bs_icon("house-door"),
+  theme = ifelse(sw_higher, "warning", "primary")
+)
+
+## A621b: Auto's S130 ---------------------------------------------------
+waarde <- el_auto_S130
+waarde <- prettyNum(waarde, big.mark = ".", decimal.mark = ",")
+value_box(
+  title = paste0("El. Auto's (", nr_auto_S130, ")"),
+  value = paste0(waarde, " GWh"),
+  showcase = bsicons::bs_icon("car-front"),
+  theme = ifelse(sw_higher, "warning", "primary")
+)
+
+## A621c: Totaal S130 ---------------------------------------------------
+waarde <- round(df_A6$tot_el[df_A6$scenario == "S130"], digits = 0)
+waarde <- round(waarde / 1000000, digits = 1)             ## convert to GWh
+waarde <- prettyNum(waarde, big.mark = ".", decimal.mark = ",")
+value_box(
+  title = paste0("Totaal"),
+  value = paste0(waarde, " GWh"),
+  showcase = bsicons::bs_icon("globe2"),
+  theme = ifelse(sw_higher, "warning", "primary")
+)
+
+```
+
+
+### Row A62.2 {height=55%}
+
+```{r Map_A622}
+#| label: R-code map A622
+#| title: "Ruimtelijke ontwikkelstrategie: 130% scenario (6k woningen, alleen BENG appartementen)"
+
+# Create HTML-labels
+labels <- sprintf(
+  "<strong>%s</strong><br/>Verbruik: %s<br/>Extra won: %s",
+  sf_A62$naam,  
+  paste0(prettyNum(round(sf_A62$S130_el, digits = -3), big.mark = ".", decimal.mark = ","), " kWh"),
+  prettyNum(round(sf_A62$S130_add, digits = 0), big.mark = ".", decimal.mark = ",")) %>%
+  lapply(htmltools::HTML)
+
+# Create map
+leaflet(sf_A62) %>%
+  addTiles() %>%
+  ## focusgebieden
+  # addPolygons(data = sf_foc, group = "focusgebieden",
+  #   stroke = TRUE, color = "brown",
+  #   weight="1", smoothFactor = 0.3, fillOpacity = 0.2, fillColor = "red",
+  #   label = ~paste0("Focusgebied: ", sf_foc$naam)) %>%
+  ## congestie netwerk
+  addPolygons(data = sf_A42, group = "congestie",
+    stroke = TRUE, color = "brown",
+    weight = "1", smoothFactor = 0.3,
+    fillOpacity = 0.3, 
+    fillColor = ~ifelse(sf_A42$congestie == "Ja", "blue",
+                        ifelse(sf_A42$congestie == "Nee", "green",
+                               "lightblue")),
+    label = ~paste0("Dreigende congestie: ", sf_A42$congestie)) %>%
+  ## buurten elektriciteitsverbruik
+  addPolygons(data = sf_A62, group = "verbruik",
+              stroke = TRUE, color = "red",
+              weight="1", smoothFactor = 0.3, fillOpacity = 0.7,
+              fillColor = ~colorbins_S130(sf_A62$S130_el),
+              highlight = highlightOptions(weight = 2, color = "red",
+                                           fillOpacity = 0.3,
+                                           bringToFront = TRUE),
+    label = ~labels) %>%
+  ## layer check-marks
+  addLayersControl(
+    baseGroups = c("basemap (OSM)"),
+    overlayGroups = c("verbruik", "focusgebieden", "congestie"),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+
+```
+
+### Row A62.3 {height=30%}
+
+```{r plot_A623}
+#| label: R-code plot A623
+
+## make a stacked barchart for the number of woningen per woning type for the years from 2024 to 2040
+df_plot_A623 <- df_scen01_details %>% 
+  filter(won_type != "tot",
+         scenario == "S130") %>% 
+  filter(jaar %in% as.character(c(msr_jr:end_all))) %>% 
+  select(jaar, won_type, nr_won) %>% 
+  group_by(jaar, won_type) %>% 
+  summarise(nr_won = sum(nr_won, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(jaar = as.integer(jaar)) |> 
+  mutate(won_type = as.factor(won_type))
+
+ggplot(df_plot_A623, aes(x = jaar, y = nr_won, fill = won_type)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Jaar", y = "", fill = "Woningtype") +
+  scale_fill_brewer(palette = "Set3") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  scale_y_continuous(labels = scales::comma) +
+  ggtitle("Aantal woningen per type") 
+
+```
+
+# 7. Overbelasting
+
+```{r section_A7}
+#| label: R-code prep A7
+#| include: false
+
+## -------------------------------------------------------------------------- #
+## ---- Gather data --------------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+periode <- c(as.character(end_all))
+df_A7 <- df_scen01_details %>% 
+  filter(jaar %in% periode,
+         won_type == "tot") %>% 
+  group_by(scenario, jaar) %>% 
+  summarise(tot_el_won = sum(tot_el_won, na.rm = TRUE),
+            tot_el_auto = sum(tot_el_auto, na.rm = TRUE),
+            tot_el = sum(tot_el, na.rm = TRUE)) %>% 
+  ungroup()
+
+## -------------------------------------------------------------------------- #
+## klaarzetten dataframes rond elektriciteitsverbruik ----------------------- #
+## -------------------------------------------------------------------------- #
+## --- Data per buurt in 2040 ----------------------------------------------- #
+## AANNAMES NETWERKCAPACITEIT ##
+max_el_con <- 1.5       ## max el.verbr. stijging = 50% in buurten met dreiging
+max_el_brt <- 2.0   ## max el.verbr. stijging = 100% in buurten zonder dreiging
+
+
+## Vector met kleuren voor de mate van overschrijding (mvo):
+## groen mvo =0 (geen overschrijding), steeds roder voor > 0
+# v_kleur <- c("#C5E0B4","#FF0000", "#EF0000","#DF0000","#CF0000",
+#              "#BF0000","#AF0000","#9F0000","#8F0000")
+v_kleur <- c("#C5E0B4","#FFD9DA", "#FFB3B5","#FF8C8F","#FF666A",
+             "#FF454A","#FF0000","#D40002","#A70002")
+
+sf_A71 <- sf_brt_details 
+df_A71 <- sf_A71 %>% 
+  st_drop_geometry() %>%
+  select(code, naam, 
+         cur_tot_tot_el, S100_tot_tot_el, S130_tot_tot_el, congestie) %>%
+  rename(S100_el = S100_tot_tot_el,
+         S130_el = S130_tot_tot_el,
+         cur_el = cur_tot_tot_el) %>% 
+  mutate(cur_el = ifelse(is.na(cur_el), 0, cur_el),
+         S100_el = ifelse(is.na(S100_el), 0, S100_el),
+         S130_el = ifelse(is.na(S130_el), 0, S130_el)) %>% 
+  mutate(max_el = ifelse(congestie == "Nee", cur_el * max_el_brt,
+                                cur_el * max_el_con),
+         S100_con = ifelse(S100_el > max_el, TRUE, FALSE),
+         S130_con = ifelse(S130_el > max_el, TRUE, FALSE),
+         S100_ovs = ifelse(S100_con, S100_el - max_el, 0),
+         S130_ovs = ifelse(S130_con, S130_el - max_el, 0)) %>% 
+  pivot_longer(cols = -c(code, naam, cur_el, congestie, max_el),
+               names_to = c("scenario",".value"), names_sep = "_") %>% 
+  mutate(mvo = cut(ovs, breaks = 8, labels = c(1:8)),
+         mvo = ifelse(ovs == 0, 0, mvo),
+         kleur = v_kleur[mvo + 1])
+
+## -------------------------------------------------------------------------- #
+## ---- Samenstellen table met totalen per scenario (2040) ------------------ #
+## -------------------------------------------------------------------------- #
+df_A72 <- df_A71 %>% 
+  group_by(scenario) %>% 
+  summarise(cur_el = sum(cur_el, na.rm = TRUE),
+            max_el = sum(max_el, na.rm = TRUE),
+            el = sum(el, na.rm = TRUE),
+            ovs = sum(ovs, na.rm = TRUE),
+            nr_con = sum(con, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(cur_el = paste0(prettyNum(round(cur_el, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+         max_el = paste0(prettyNum(round(max_el, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+         el =  paste0(prettyNum(round(el, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+         ovs =  paste0(prettyNum(round(ovs, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+         nr_con =  prettyNum(round(nr_con, digits = -0),
+                   big.mark = ".", decimal.mark = ",")) %>% 
+  rename(`Huidig verbruik` = cur_el,
+         `Verbruik in 2040` = el,
+         `Maximaal verbruik` = max_el,
+         `Overschrijding` = ovs,
+         `Buurten met el.gebrek` = nr_con) %>% 
+  pivot_longer(cols = -scenario, 
+               names_to = "type", values_to = "waarde")
+
+
+## -------------------------------------------------------------------------- #
+## create SharedData for CrossTalk ------------------------------------------ #
+## -------------------------------------------------------------------------- #
+
+```
+
+## Inputs_A.7 {.sidebar}
+
+**A7. Totaal elektriciteitsverbruik per buurt in 2040**  
+
+**NB. AANNAMES**
+
+In buurten waar nog **geen** transportschaarste heerst kan het elektriciteitsverbruik met **100%** toenemen
+
+In buurten waar **wel** transportschaarste dreigt kan het elektriciteitsverbruik maar met **50%** toenemen
+
+Next step: overleg met Enexis over de maximale netwerkcapaciteit per buurt in de aankomende jaren
+
+---
+
+```{r}
+#| label: R-code side A7
+#| include: false
+
+
+```
+
+## Col_A71
+
+### Row A71.1 {height=70%}
+
+```{r Map_A721}
+#| label: R-code map A721
+#| title: "Ruimtelijke ontwikkelstrategie: 100% scenario (4k5 woningen, diverse types conform buurtprofiel)"
+
+# Filter scenario data and add to shape file
+sf_A71 <- sf_brt_details 
+df_A71_2bjoined <- df_A71 %>% 
+  filter(scenario == "S100") %>% 
+  select(code, cur_el, max_el, el, con, ovs, kleur)
+
+sf_A71 <- sf_A71 %>% 
+  left_join(df_A71_2bjoined)
+
+# Create HTML-labels
+labels <- sprintf(
+  "<strong>%s</strong><br/>Maximaal: %s<br/>Overschrijding: %s",
+  sf_A71$naam,  
+  paste0(prettyNum(round(sf_A71$max_el, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+  paste0(prettyNum(round(sf_A71$ovs, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh")) %>%
+  lapply(htmltools::HTML)
+
+# Create map
+leaflet(sf_A71) %>%
+  addTiles() %>%
+  addPolygons(data = sf_A71, group = "verbruik",
+    stroke = TRUE, color = "red",
+    weight="1", smoothFactor = 0.3, fillOpacity = 0.7,
+    fillColor = sf_A71$kleur,
+    highlight = highlightOptions(weight = 2, color = "red",
+                                           fillOpacity = 0.3,
+                                           bringToFront = TRUE),
+    label = ~labels)
+
+```
+
+
+### Row A71.2 {height=30%}
+
+```{r table_A721}
+#| label: R-code tbl A721
+
+sc_code <- "S100"
+
+## prepare table for display
+df_tbl_A721 <- df_A72 %>% 
+  filter(scenario == sc_code) %>% 
+  select(-scenario) %>% 
+  rename(`S100` = type)
+
+## display table
+NumCols <- 1:ncol(df_tbl_A721)
+
+df_tbl_A721 %>% 
+  DT::datatable(rownames = FALSE,
+                options = list(
+                  dom = "t", 
+                  bPaginate=FALSE, scrollY = "400px",
+                  autoWidth = TRUE, paging=FALSE, 
+                  class = "compact",
+                  fillContainer = TRUE)) %>%
+  DT::formatStyle(columns = NumCols, 'vertical-align'='top')
+
+```
+
+## Col_A72
+
+### Row A72.1 {height=70%}
+
+```{r Map_A722}
+#| label: R-code map A722
+#| title: "Ruimtelijke ontwikkelstrategie: 130% scenario (6k woningen, alleen BENG appartementen)"
+
+sf_A71 <- sf_brt_details 
+df_A71_2bjoined <- df_A71 %>% 
+  filter(scenario == "S130") %>% 
+  select(code, cur_el, max_el, el, con, ovs, kleur)
+
+sf_A71 <- sf_A71 %>% 
+  left_join(df_A71_2bjoined)
+
+# Create HTML-labels
+labels <- sprintf(
+  "<strong>%s</strong><br/>Maximaal: %s<br/>Overschrijding: %s",
+  sf_A71$naam,  
+  paste0(prettyNum(round(sf_A71$max_el, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+  paste0(prettyNum(round(sf_A71$ovs, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh")) %>%
+  lapply(htmltools::HTML)
+
+# Create map
+leaflet(sf_A71) %>%
+  addTiles() %>%
+  addPolygons(data = sf_A71, group = "verbruik",
+    stroke = TRUE, color = "red",
+    weight="1", smoothFactor = 0.3, fillOpacity = 0.7,
+    fillColor = sf_A71$kleur,
+    highlight = highlightOptions(weight = 2, color = "red",
+                                           fillOpacity = 0.3,
+                                           bringToFront = TRUE),
+    label = ~labels)
+
+```
+
+### Row A72.2 {height=30%}
+
+```{r table_A722}
+#| label: R-code tbl A722
+
+sc_code <- "S130"
+
+## prepare table for display
+df_tbl_A722 <- df_A72 %>% 
+  filter(scenario == sc_code) %>% 
+  select(-scenario) %>% 
+  rename(S130 = type)
+
+## display table
+NumCols <- 1:ncol(df_tbl_A722)
+
+df_tbl_A722 %>% 
+  DT::datatable(rownames = FALSE,
+                options = list(
+                  dom = "t", 
+                  bPaginate=FALSE, scrollY = "400px",
+                  autoWidth = TRUE, paging=FALSE, 
+                  class = "compact",
+                  fillContainer = TRUE)) %>%
+  DT::formatStyle(columns = NumCols, 'vertical-align'='top')
+
+```
+
+
+
+# 8. Details
+
+```{r section_A8, include=FALSE, warnings=FALSE}
+#| label: R-code prep A8
+
+## -------------------------------------------------------------------------- #
+## ---- Gather data --------------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+df_A71_2bjoined <- df_A71 %>% 
+  select(code, scenario, max_el, con, ovs, mvo)
+
+df_focus2bjoined <- read_rds(fpath_scen01) %>% 
+  select(cbs, focusnaam)
+
+periode <- c("2021", "2040")
+periode <- c("2040")
+type <- c("tot")
+df_tbl_A8 <- df_scen01_details %>% 
+  filter(won_type %in% type) %>% 
+  filter((jaar == "2024" & scenario == "S100") | jaar == "2040") %>% 
+  mutate(scenario = ifelse(jaar == "2024", "Nu", scenario)) %>% 
+  select(-starts_with("area"), -fct_won, -nr_auto_bs, -nr_auto_tot,
+         -won_type, -jaar) %>% 
+  left_join(df_focus2bjoined, by = c("code" = "cbs")) %>% 
+  mutate(focus = focusnaam,
+         nr_won = prettyNum(round(nr_won, digits = 0), 
+                            big.mark = ".", decimal.mark = ","),
+         gem_el_won = paste0(prettyNum(round(gem_el_won, digits = 0),
+                                       big.mark = ".", decimal.mark = ","), " kWh"),
+         tot_el_won = paste0(prettyNum(round(tot_el_won, digits = 0),
+                                       big.mark = ".", decimal.mark = ","), " kWh"),
+         nr_auto_el = prettyNum(round(nr_auto_el, digits = 0),
+                                big.mark = ".", decimal.mark = ","),
+         nr_lp = prettyNum(round(nr_lp, digits = 0),
+                           big.mark = ".", decimal.mark = ","),
+         tot_el_auto = paste0(prettyNum(round(tot_el_auto, digits = 0),
+                                        big.mark = ".", decimal.mark = ","), " kWh"),
+         tot_el = paste0(prettyNum(round(tot_el, digits = 0),
+                                   big.mark = ".", decimal.mark = ","), " kWh")) %>% 
+  mutate(warmtevisie = ifelse(warmtevisie == "wp", "warmtepomp", "warmtenet")) %>% 
+  left_join(df_A71_2bjoined, by = c("code"= "code", "scenario" = "scenario")) %>% 
+  mutate(max_el = prettyNum(round(max_el, digits = 0), 
+                            big.mark = ".", decimal.mark = ","),
+         con = ifelse(con, "Ja", "Nee"),
+         ovs = paste0(prettyNum(round(ovs, digits = 0),
+                                   big.mark = ".", decimal.mark = ","), " kWh")) %>% 
+  select(buurt, scenario, focus, congestie, warmtevisie,
+         nr_won, nr_auto_el, nr_lp,
+         gem_el_won, tot_el_won, tot_el_auto, tot_el, max_el, ovs, con, mvo)
+
+## -------------------------------------------------------------------------- #
+## create SharedData for CrossTalk ------------------------------------------ #
+## -------------------------------------------------------------------------- #
+# share_tbl_A8 <- SharedData$new(df_tbl_A8, key = ~type, group = "A8")
+share_tbl_A8 <- SharedData$new(df_tbl_A8, key = ~buurt, group = "A8")
+# share_tbl_A8_ix <- SharedData$new(df_tbl_A8, key = ~scenario, group = "A8")
+
+```
+
+## Inputs_A.8 {.sidebar}
+
+**A8. Tabel met details**  
+
+<font size="0.8em">
+
+Deze tabel geeft alle details weer:
+
+* scenario: S100 of S130. "Nu" geeft de huidige standen weer.
+* focus: naam van focusgebied als deze geldt voor de buurt
+* congestie: Of er wel of niet transportschaarste dreigt
+* warmtevisie: Buurt wordt met een warmtenet of warmtepomp voorzien
+* nr_won: aantal woningen
+* nr_auto_el: aantal elektrische auto's
+* nr_lp: aantal laadpalen
+* gem_el_won: jaargemiddeld elektr. verbruik woningen
+* tot_el_won: totaal elektr. verbruik woningen
+* tot_el_auto: totaal elektr. verbruik auto's
+* tot_el: totaal elektr. verbruik buurt
+* max_el: maximale elektr. verbruik (zie aanname boven)
+* ovs: elektr. verbruik dat boven maximum uitkomt (kan dus niet worden geleverd)
+* con: kent de buurt een elektr. verbruik dat boven maximum het uitkomt
+* mvo: mate van overschrijding van het gewenste elektr. verbruik boven het maximum
+
+
+Met onderstaand selectie-veld kan een specifieke buurt worden geselecteerd:
+
+</font>
+
+---
+
+```{r}
+#| label: R-code side A8
+
+# filter checkboxes
+# filter_checkbox("A8a", "Scenario", share_tbl_A8_ix, ~scenario,
+#                 inline = FALSE)
+# # filter_checkbox("A8b", "Woning-type", share_tbl_A8, ~won_type,
+# #                 inline = FALSE)
+# filter_checkbox("A8c", "Jaar", share_tbl_A8, ~jaar,
+#                 inline = FALSE)
+filter_select("A8d", "Buurt", share_tbl_A8, ~buurt)
+
+```
+
+## MainCol_A8
+
+```{r prep_A81}
+#| label: R-code prep A81
+
+## Select --------------------------------------------------------------------
+
+
+```
+
+
+```{r table_A82}
+#| label: R-code tbl A82
+#| title: "Table A82. Ruimtelijke Ontw.Strategie per buurt"
+
+NumCols <- 1:ncol(df_tbl_A8)
+
+share_tbl_A8 %>%
+  DT::datatable(
+    filter = "none", rownames = FALSE,
+    extensions = c("Buttons"),
+    style = "bootstrap", class = "compact", width = "100%",
+    callback=JS('$("button.buttons-colvis").css("background","white");
+                 $("button.buttons-colvis").css("color","gray");
+                 $("button.buttons-pdf").css("background","white");
+                 $("button.buttons-pdf").css("color","gray");
+                 $("button.buttons-excel").css("background","white");
+                 $("button.buttons-excel").css("color","gray");
+                 return table;'),
+    colnames=c("buurt", "scenario", "focus", "congestie", "warmtevisie",
+               "# woningen", "# el.auto", "# laadpalen",
+               "jr.gem won", "tot.el. won", "tot.el auto", "tot.el",
+               "max.el", "gebrek.el", "gebrek.J/N", "gebrek.mate"),
+    options = list(dom = "Bt", deferRender = TRUE,
+                   bPaginate=FALSE, scrollY = "650px",
+                   fillContainer = TRUE, autoWidth = TRUE, paging=FALSE,
+                   headerCallback = DT::JS(
+                     "function(thead) {",
+                     "  $(thead).css('font-size', '0.7em');",
+                     "}" ),
+                   buttons = list(I("colvis"), "pdf", "excel"))) %>%
+  DT::formatStyle(columns = NumCols, fontSize = '70%') %>%
+  DT::formatStyle(columns = NumCols, 'vertical-align'='top') %>%
+  DT::formatStyle('scenario', target = 'row', color =
+                  DT::styleEqual(c("S100", "S130", "RS"),
+                               c('steelblue', 'maroon', 'darkgreen')))
+
+```
+
+# 9. Test
+
+```{r section_A9}
+#| label: R-code prep A9
+#| include: false
+
+## -------------------------------------------------------------------------- #
+## klaarzetten dataframes rond elektriciteitsverbruik ----------------------- #
+## -------------------------------------------------------------------------- #
+## --- Data voor hele gemeente in 2040 -------------------------------------- #
+periode <- c(as.character(end_all))
+df_A9 <- df_scen01_details %>% 
+  filter(jaar %in% periode,
+         won_type == "tot") %>% 
+  group_by(scenario, jaar) %>% 
+  summarise(tot_el_won = sum(tot_el_won, na.rm = TRUE),
+            tot_el_auto = sum(tot_el_auto, na.rm = TRUE),
+            tot_el = sum(tot_el, na.rm = TRUE)) %>% 
+  ungroup()
+
+## -------------------------------------------------------------------------- #
+## --- Data per buurt in 2040 ----------------------------------------------- #
+## -------- Klaarzetten DF met buurtgegevens voor joining met sf_brt_details  #
+##          in de map A71.1 ------------------------------------------------- #
+## -------------------------------------------------------------------------- #
+## STEERING THE AVAILABLE ADDITIONAL EV-CAPACITY DEPENDING CONGESTION ------  #
+## We willen weten of we een overschrijding van EV-capaciteit krijgen in 2040 #
+## Daarvoor hebben we nodig:
+## 1) de huidige elektr. capaciteit in de buurt (cur_el)
+## 2) de elektr. capaciteit in 2040 (S100_el, S130_el -> scen_el)
+## 3) is er sprake van congestie in de buurt (congestie)
+## 4) de maximale elektr. capaciteit in de buurt (max_el) gebaseerd op het
+##    huidige verbruik (cur_el) en de nog beschikbare additionele capaciteit
+## 5) ovs_ind: is het EV in 20240 (scen_el) groter dan max_el?
+## 6) ovs: hoeveel elektr. capaciteit is er tekort?
+## 7) mvo: mate van overschrijding (0-8) van het tekort
+## 8) kleur: kleur voor de mate van overschrijding (mvo) voor de kaart 
+##
+## Hieronder bouwen een dataframe op met de relevante gegevens voor de kaart
+## -------------------------------------------------------------------------- #
+## Vector met kleuren voor de mate van overschrijding (mvo):
+## groen mvo =0 (geen overschrijding), steeds roder voor > 0
+# v_kleur <- c("#C5E0B4","#FF0000", "#EF0000","#DF0000","#CF0000",
+#              "#BF0000","#AF0000","#9F0000","#8F0000")
+v_kleur <- c("#C5E0B4","#FFD9DA", "#FFB3B5","#FF8C8F","#FF666A",
+             "#FF454A","#FF0000","#D40002","#A70002")
+
+## Vector met instellingen voor de filter (10% - 100%). Hiermee kan de user   #
+## de mate van extra elektr. capaciteit die beschikbaar is binnen 1) een      #
+## netwerk met congestie en 2) een netwwerk zonder congestie                  #
+v_cong <- seq(10, 100, by = 10)           ## percentages extra EV met congestie
+v_vrij <- seq(10, 100, by = 10)        ## percentages extra EV zonder congestie
+
+## -------------------------------------------------------------------------- #
+## Make spatial dataframe with relevant columns for leaflet-map
+## -------------------------------------------------------------------------- #
+## Make spatial dataframe with relevant columns for leaflet-map
+
+sf_A91 <- sf_brt_details 
+df_A91_S100 <- sf_A91 %>% 
+  st_drop_geometry() %>%
+  select(code, naam, cur_tot_tot_el, S100_tot_tot_el, congestie) %>%
+  rename(scen_el = S100_tot_tot_el, 
+         cur_el = cur_tot_tot_el) |> 
+  replace_na(list(cur_el = 0, scen_el = 0))
+         
+df_A91_S100 <- df_A91_S100
+for (i in seq_along(v_cong)) {
+  for (j in seq_along(v_vrij)) {
+    col_name <- paste0("pct_", v_cong[i], "_", v_vrij[j])
+    df_A91_S100[[col_name]] <- ifelse(df_A91_S100$congestie == "Ja", 
+              df_A91_S100$cur_el + df_A91_S100$cur_el * (v_cong[i] / 100),
+              df_A91_S100$cur_el + df_A91_S100$cur_el * (v_vrij[j] / 100))
+  }  
+}
+
+df_A91_2bjoined <- df_A91_S100 |> 
+  pivot_longer(cols = -c(code, naam, cur_el, scen_el, congestie),
+               names_to = c("pct", "pct_cong", "pct_vrij"), 
+               names_sep = "_") |> 
+  rename(max_el = value) |> 
+  select(code, pct_cong, pct_vrij, naam, congestie, 
+          cur_el, scen_el, max_el) |> 
+  mutate(pct_cong = as.integer(pct_cong),
+         pct_vrij = as.integer(pct_vrij)) |>
+  mutate(ovs_ind = ifelse(max_el < scen_el, TRUE, FALSE),
+         ovs = ifelse(ovs_ind, scen_el - max_el, 0),
+         mvo = cut(ovs, breaks = 8, labels = c(c(1:8))),
+         kleur = v_kleur[as.numeric(mvo) + 1])
+
+## -------------------------------------------------------------------------- #
+## ---- Combine sf_brt met de verkregen data -------------------------------- #
+## ---- This DF acan be filtered using the slider below --------------------- #
+sf_A91_S100 <- sf_brt_details |> 
+  select (code, geometry) |>
+  left_join(df_A91_2bjoined, by = "code") |> 
+  mutate(pct_key = paste0(code, "_", pct_cong, "_", pct_vrij)) |>
+#  filter(naam == "Laarveld") |> 
+  select(pct_key, everything()) 
+
+## -------------------------------------------------------------------------- #
+## ---- Samenstellen table met totalen per scenario (2040) ------------------ #
+## -------------------------------------------------------------------------- #
+df_A92_S100 <- sf_A91_S100 |> 
+  st_drop_geometry() |>
+  group_by(pct_key, pct_cong, pct_vrij) |>
+  summarise(cur_el = sum(cur_el, na.rm = TRUE),
+            max_el = sum(max_el, na.rm = TRUE),
+            scen_el = sum(scen_el, na.rm = TRUE),
+            ovs = sum(ovs, na.rm = TRUE),
+            ovs_nr = sum(ovs_ind, na.rm = TRUE)) |> 
+  ungroup() |>
+  mutate(cur_el = paste0(prettyNum(round(cur_el, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+         max_el = paste0(prettyNum(round(max_el, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+         scen_el =  paste0(prettyNum(round(scen_el, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+         ovs =  paste0(prettyNum(round(ovs, digits = -3),
+                   big.mark = ".", decimal.mark = ","), " kWh"),
+         ovs_nr =  prettyNum(round(ovs_nr, digits = -0),
+                   big.mark = ".", decimal.mark = ",")) %>% 
+  rename(`Huidig verbruik` = cur_el,
+         `Verbruik in 2040` = scen_el,
+         `Maximaal verbruik` = max_el,
+         `Overschrijding` = ovs,
+         `Buurten met el.gebrek` = ovs_nr) %>% 
+  pivot_longer(cols = -c(pct_key, pct_cong, pct_vrij), 
+               names_to = "type", values_to = "waarde")
+
+## -------------------------------------------------------------------------- #
+## create SharedData for CrossTalk ------------------------------------------ #
+## -------------------------------------------------------------------------- #
+## make a dataframe with two columns that each range from 0 to 100
+df_keys <- sf_A91_S100 |> 
+  select(pct_key, code, naam, pct_cong, pct_vrij) |> 
+  st_drop_geometry()
+share_keys <- SharedData$new(df_keys, ~pct_key)
+share_sf_A91 <- SharedData$new(sf_A91_S100, ~pct_key, 
+                                group = share_keys$groupName())
+share_df_A92 <- SharedData$new(df_A92_S100, ~pct_key, 
+                                group = share_keys$groupName())
+
+```
+
+## Inputs_A.9 {.sidebar}
+
+**A9. Totaal elektriciteitsverbruik per buurt in 2040**  
+
+**NB. AANNAMES**
+
+In buurten waar nog **geen** transportschaarste heerst kan het elektriciteitsverbruik met **100%** toenemen
+
+In buurten waar **wel** transportschaarste dreigt kan het elektriciteitsverbruik maar met **50%** toenemen
+
+Next step: overleg met Enexis over de maximale netwerkcapaciteit per buurt in de aankomende jaren
+
+---
+
+```{r slider_A9}
+#| label: R-code side A9
+#| title: slider
+
+filter_select("brt", "Buurt", share_keys, ~naam, multiple = FALSE)
+filter_select("cong", "Extra capaciteit beschikbaar met congestie", 
+                                share_keys, ~pct_cong, multiple = FALSE, )
+filter_select("vrij", "Extra capaciteit beschikbaar zonder congestie", 
+                                share_keys, ~pct_vrij, multiple = FALSE)
+```
+
+## Col_A91
+
+### Row A91.1 {height=70%}
+
+```{r Map_A921}
+#| label: R-code map A921
+#| title: "Ruimtelijke ontwikkelstrategie: 100% scenario (4k5 woningen, diverse types conform buurtprofiel)"
+
+# Create map
+leaflet(share_sf_A91) %>%
+  addTiles() %>%
+  addPolygons(data = share_sf_A91, group = "verbruik",
+    stroke = TRUE, color = "red",
+    weight = "1", smoothFactor = 0.3, fillOpacity = 0.7,
+    highlight = highlightOptions(weight = 2, color = "black",
+                                 fillOpacity = 0.3,
+                                 bringToFront = TRUE),
+    label = ~paste0("Buurt: ", sf_A91_S100$naam, 
+                    "<br/>Huidig: ", 
+                     prettyNum(round(sf_A91_S100$cur_el, digits = -3),
+                               big.mark = ".", decimal.mark = ","), " kWh",
+                     "<br/>2040: ",
+                     prettyNum(round(sf_A91_S100$scen_el, digits = -3),
+                               big.mark = ".", decimal.mark = ","), " kWh",
+                     "<br/>Max: ",
+                     prettyNum(round(sf_A91_S100$max_el, digits = -3),
+                               big.mark = ".", decimal.mark = ","), " kWh",
+                     "<br/>Slider_cong: ", sf_A91_S100$pct_key,
+                     "<br/>Congestie: ", sf_A91_S100$congestie),
+    # label = ~paste0("Sliders: ", sf_A91_S100$pct_key, " | ", sf_A91_S100$naam),
+    fillColor = sf_A91_S100$kleur)
+
+```
+
+### Row A91.2 {height=30%}
+
+```{r table_A912}
+#| label: R-code tbl A912
+#| title: "Table A912. Ruimtelijke Ontw.Strategie per buurt"
+ 
+## display table
+NumCols <- 1:ncol(df_A92_S100)
+
+share_df_A92 %>% 
+  DT::datatable(rownames = FALSE,
+                options = list(
+                  dom = "t", 
+                  bPaginate=FALSE, scrollY = "400px",
+                  autoWidth = TRUE, paging=FALSE, 
+                  class = "compact",
+                  fillContainer = TRUE)) %>%
+  DT::formatStyle(columns = NumCols, 'vertical-align'='top')
+
+```
+
 

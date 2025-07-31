@@ -7,6 +7,7 @@
 
 06_interface/*.html
 06_interface/Research_WBO_files
+Research_WBO_files/
 _extensions
 pictures/
 *.Rproj
