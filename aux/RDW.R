@@ -15,8 +15,7 @@ rdw_kl <- fromJSON(rdw_url_kl)
 rdw_bs <- fromJSON(rdw_url_bs)
 
 
-https://opendata.rdw.nl/api/v3/views/m9d7-ebf2/query.json?pageNumber=1&pageSize=10&app_token=$YOUR_APP_TOKEN
-
+## https://opendata.rdw.nl/api/v3/views/m9d7-ebf2/query.json?pageNumber=1&pageSize=10&app_token=$YOUR_APP_TOKEN
 
 ## Install the required package with:
 ## install.packages("RSocrata")
